@@ -1,0 +1,30 @@
+services:
+  minidock:
+    build: .
+    environment:
+      MINIDOCK_ADDRESS: 0.0.0.0:8080
+      MINIDOCK_DATABASE_PATH: /var/lib/minidock/minidock.db
+      MINIDOCK_ENVIRONMENT: production
+    volumes:
+      - minidock-data:/var/lib/minidock
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.10-alpine
+    depends_on:
+      - minidock
+    environment:
+      MINIDOCK_DOMAIN: ${MINIDOCK_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  minidock-data:
+  caddy-data:
+  caddy-config:
