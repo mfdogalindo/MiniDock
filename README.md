@@ -20,12 +20,21 @@ La primera base incluye:
 ```sh
 cp .env.example .env
 go mod tidy
-go run ./cmd/minidock
+./dev.sh
 ```
 
 Abre `http://127.0.0.1:8080`. El primer acceso muestra el asistente de
 configuración. La base de datos se crea en `./data/minidock.db` y está excluida
-de Git.
+de Git. `dev.sh` ejecuta las pruebas y usa un observador para reconstruir y
+reiniciar el servidor al modificar archivos Go o plantillas HTML. El observador está
+implementado en Go y conserva la última instancia válida si un cambio no
+compila. Recarga el navegador para ver el resultado SSR actualizado.
+
+Para ejecutar una instancia sin observación de cambios:
+
+```sh
+go run ./cmd/minidock
+```
 
 ## Ejecutar con Docker
 
