@@ -1,7 +1,19 @@
+# Configuración local y secretos (la plantilla pública sí se versiona).
 .env
+.env.*
+!.env.example
+
+# Estado y datos generados en ejecución.
 data/
+logs/
+apps/
 bin/
 tmp/
 *.db
 *.db-shm
 *.db-wal
+
+# Artefactos de Go y del sistema.
+coverage.out
+*.test
+.DS_Store

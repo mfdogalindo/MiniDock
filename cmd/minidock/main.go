@@ -26,6 +26,9 @@ func main() {
 		log.Fatalf("create application: %v", err)
 	}
 	defer application.Lock()
+	queueContext, stopQueue := context.WithCancel(context.Background())
+	defer stopQueue()
+	application.StartQueue(queueContext)
 
 	server := &http.Server{
 		Addr:              config.Address,

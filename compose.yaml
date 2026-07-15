@@ -5,12 +5,19 @@ services:
       MINIDOCK_ADDRESS: 0.0.0.0:8080
       MINIDOCK_DATABASE_PATH: /var/lib/minidock/minidock.db
       MINIDOCK_ENVIRONMENT: production
+      MINIDOCK_WORKSPACE_PATH: /var/lib/minidock/apps
+      MINIDOCK_LOG_PATH: /var/lib/minidock/logs
+      MINIDOCK_LOCAL_REPOSITORIES_PATH: /repos
+      MINIDOCK_GITHUB_APP_ID: ${MINIDOCK_GITHUB_APP_ID:-}
+      MINIDOCK_GITHUB_APP_PRIVATE_KEY_PATH: ${MINIDOCK_GITHUB_APP_PRIVATE_KEY_PATH:-}
     volumes:
       - minidock-data:/var/lib/minidock
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${MINIDOCK_LOCAL_REPOSITORIES_PATH_HOST:-./repositories}:/repos:rw
     restart: unless-stopped
 
   caddy:
-    image: caddy:2.10-alpine
+    image: lucaslorentz/caddy-docker-proxy:2.10-alpine
     depends_on:
       - minidock
     environment:
@@ -19,7 +26,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - caddy-data:/data
       - caddy-config:/config
     restart: unless-stopped
@@ -28,3 +35,7 @@ volumes:
   minidock-data:
   caddy-data:
   caddy-config:
+
+networks:
+  default:
+    name: minidock
