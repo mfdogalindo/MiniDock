@@ -9,7 +9,8 @@ MiniDock detecta los dos runtimes al intentar un despliegue:
 Configura la preferencia global con `MINIDOCK_RUNTIME`:
 
 ```sh
-# elige Apple Container si está disponible; de lo contrario Docker
+# usa Docker cuando está disponible (integra el proxy dinámico de MiniDock);
+# usa Apple Container solo como alternativa
 MINIDOCK_RUNTIME=auto
 
 # exige una implementación concreta y falla si no está lista

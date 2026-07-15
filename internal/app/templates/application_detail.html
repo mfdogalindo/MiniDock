@@ -1,7 +1,7 @@
 {{define "application_detail.html"}}
 <!doctype html>
 <html lang="es">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Application.Name}} · MiniDock</title>{{template "theme"}}<script src="/static/deployment-log.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Application.Name}} · MiniDock · by Kyberix</title>{{template "theme"}}<script src="/static/deployment-log.js" defer></script></head>
 <body><main class="shell">
 <a class="back" href="/">← Panel</a>
 <div class="page-head"><div><p class="eyebrow">Aplicación / {{.Application.Type}}</p><h1>{{.Application.Name}}</h1><p><code>{{.Application.Repository}}</code> · <code>{{.Application.Branch}}</code> · {{.Application.Domain}}</p></div><a class="button" href="/applications/{{.Application.ID}}/secrets">Secretos</a></div>
@@ -27,5 +27,6 @@
 <section><p class="eyebrow">Automatización</p><h2>Reglas de entrega</h2><form method="post" action="/applications/{{.Application.ID}}/automation"><label><input type="checkbox" name="deploy_on_push" {{if .Application.DeployOnPush}}checked{{end}}> Desplegar al recibir push en <code>{{.Application.Branch}}</code></label><label><input type="checkbox" name="require_confirmation" {{if .Application.RequireConfirmation}}checked{{end}}> Pedir confirmación antes de producción</label><label><input type="checkbox" name="auto_rollback" {{if .Application.AutoRollback}}checked{{end}}> Restaurar la última versión exitosa tras un health check fallido</label><p class="hint">La entrega por push y la confirmación interactiva son excluyentes.</p><div class="form-actions"><button>Guardar reglas</button></div></form></section>
 
 <section><p class="eyebrow">Trazabilidad</p><h2>Historial de despliegues</h2>{{if .Deployments}}<div class="table-wrap"><table><thead><tr><th>Inicio</th><th>Acción</th><th>Estado</th><th>Imagen</th><th>Log</th></tr></thead><tbody>{{range .Deployments}}<tr><td>{{.StartedAt}}</td><td>{{.Action}}</td><td><span class="status {{.Status}}">{{.Status}}</span></td><td><code>{{.Image}}</code></td><td><a href="/applications/{{$.Application.ID}}/deployments/{{.ID}}/logs">Ver →</a></td></tr>{{end}}</tbody></table></div>{{else}}<p class="muted">Aún no hay despliegues.</p>{{end}}</section>
+{{template "brand-footer"}}
 </main></body></html>
 {{end}}

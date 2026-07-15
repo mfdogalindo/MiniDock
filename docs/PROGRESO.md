@@ -4,22 +4,85 @@ Este archivo es la fuente de verdad para el avance funcional. Una fase solo se
 marca como completada cuando todos sus puntos estén verificados mediante
 pruebas y una comprobación manual.
 
+El diagnóstico y plan de reingeniería para pasar de validación funcional a
+operación confiable se mantiene en [PLAN_REINGENIERIA.md](PLAN_REINGENIERIA.md).
+Sus hitos P0 prevalecen sobre ampliar runtimes o automatizaciones nuevas.
+
 ## Control actual
 
-- **Fase activa: 5 — Operación y observabilidad (implementada; pendiente de validación).**
-- Siguiente entrega: aceptación operativa completa en el host.
+### Reingeniería operativa — Hito 0 (en progreso)
+
+- Se adoptó un contrato de release neutral de proveedor: Docker, Apple
+  Container y futuros runtimes se implementan como adaptadores, no como parte
+  de la identidad persistida del release.
+- El registro de deployments admite referencia solicitada, revisión y huella
+  de fuente, digest de artefacto, runtime, manifiesto neutral y causa
+  estructurada de fallo. La captura efectiva de revisión y digest desde cada
+  adaptador queda como siguiente incremento.
+- Se añadió `RuntimeAdapter`; Docker y Apple Container son implementaciones
+  actuales. Las etiquetas de Caddy y la red Docker permanecen encapsuladas en
+  el adaptador Docker.
+- Las etapas `source`, `build`, `start`, `health` y `rollback` tienen códigos
+  de fallo persistibles. La etapa `route` se incorporará junto con el
+  adaptador de proxy del Hito 2.
+
+- **Fase activa: 6 — Flujo guiado y automatización (en validación).**
+- Siguiente entrega: exponer el despliegue validado mediante Caddy y completar
+  la aceptación de CI/CD y rollback.
 - El panel también muestra la fase activa para que el estado no dependa solo
   de consultar esta documentación.
 
 | Fase | Estado | Alcance actual | Siguiente entrega |
 |---|---|---|---|
 | 0. Base de infraestructura | Lista para validación | Servicio Go, SQLite, Docker Compose/Caddy, verificación del host, estructura de datos y backups documentados. | Ejecutar el checklist en la Mac mini y registrar la restauración de prueba. |
-| 1. MVP de MiniDock | Implementada | Registro de aplicaciones, despliegue manual Docker, historial, logs y controles de contenedor. | Validar un primer repositorio real con Dockerfile. |
+| 1. MVP de MiniDock | Implementada; validación parcial | Registro de aplicaciones, despliegue manual Docker, historial, logs y controles de contenedor. DemoTest validó el ciclo completo con una plantilla Vite SSR. | Validar un proyecto con Dockerfile propio y la exposición mediante Caddy. |
 | 2. Secretos y configuración | Lista para validación | Configuración pública y secretos cifrados por aplicación, entorno (`production`/`staging`) y destino (`build`/`runtime`); rotación, eliminación y auditoría de creación, cambio y uso. Docker inyecta secretos de build con BuildKit y de ejecución como variables del contenedor. | Ejecutar el checklist de aceptación de Fase 2 y registrar el resultado; después, iniciar Fase 3 (CI/CD). |
 | 3. CI/CD | Lista para validación | Webhook de GitHub firmado, regla por rama registrada, cola persistente por aplicación, notificación webhook y rollback a la última imagen exitosa. | Configurar GitHub y verificar un push y un rollback. |
 | 4. Plantillas de runtime | Lista para validación | Plantillas sin Dockerfile en el repositorio para estáticas, Next.js, Go, Rust y Java; health checks y límites de CPU/memoria predeterminados. | Desplegar una aplicación real de cada familia y confirmar `/healthz`. |
 | 5. Operación y observabilidad | Lista para validación | Panel consolidado, logs filtrados, métricas Docker, alertas de despliegue/disco/servicio/certificado y retención manual conservadora. | Ejecutar el checklist de aceptación y registrar el resultado. |
 | 6. Flujo guiado y automatización | En progreso | Asistente, pipeline visible y automatizaciones configurables implementados; pendiente la validación en host y ampliar la operación contextual. | Validar ambos flujos y las reglas de automatización con un despliegue real. |
+
+## Validación real: DemoTest (2026-07-15)
+
+Se validó el ciclo de compilación y despliegue con el artefacto local
+`file:///Users/manuel/Sources/DemoTest`, registrado como aplicación `demo`,
+tipo `node_ssr` (reconocido durante el build como Vite SSR), puerto `8080` y
+runtime `auto`.
+
+### Implementado y comprobado
+
+1. **Selección coherente de runtime.** `auto` prioriza Docker cuando ambos
+   runtimes están disponibles. Docker es el runtime integrado con Caddy Docker
+   Proxy mediante etiquetas; Apple Container queda disponible solo cuando se
+   selecciona explícitamente o Docker no está listo.
+2. **Red Docker autocontenida.** Antes de iniciar una aplicación Docker,
+   MiniDock comprueba la red configurada y crea `minidock` si no existe. Esto
+   permite ejecutar MiniDock directamente en desarrollo, además de Compose.
+3. **Compatibilidad Vite SSR del artefacto.** Se corrigieron las rutas relativas
+   de `entry-client.jsx` y la configuración de Vite para que el build emita
+   `dist/client/index.html`, requerido por `server.js` en producción.
+4. **Resultado de aceptación.** El despliegue `#9` terminó como `successful`:
+   construyó `minidock/demo:1784127507`, creó la red, inició
+   `minidock-demo` y el health check pasó de `starting` a `healthy`.
+5. **Regresión automatizada.** `go test ./...` finaliza correctamente e incluye
+   pruebas para la preferencia de runtime y la validación de red vacía.
+
+### Pendientes y plan de cierre
+
+1. **Exposición mediante proxy.** Iniciar Caddy Docker Proxy en la red
+   `minidock`, resolver `test.local` en el entorno de desarrollo y confirmar
+   que el dominio alcanza el contenedor saludable. Para producción, configurar
+   el DNS y `MINIDOCK_DOMAIN` antes de iniciar Compose.
+2. **CI/CD.** Convertir DemoTest en un repositorio Git o usar un repositorio
+   remoto; configurar el webhook firmado de GitHub y verificar que un push de
+   la rama autorizada encola exactamente un despliegue.
+3. **Recuperación.** Hacer un segundo despliegue exitoso, ejecutar rollback y
+   comprobar que queda registrada la imagen anterior. Después, provocar un
+   fallo de health check con `AutoRollback` activado y confirmar la acción
+   `auto_rollback`.
+4. **Cobertura de plantillas.** Repetir la aceptación con los tipos estático,
+   Next.js, Go, Rust y Java, y con una aplicación `custom` que aporte su propio
+   Dockerfile.
 
 ## Plan de trabajo: experiencia de lanzamiento y automatización
 

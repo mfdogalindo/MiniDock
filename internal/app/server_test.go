@@ -161,7 +161,7 @@ func TestApplicationFormUsesCSPCompatibleExternalScript(t *testing.T) {
 	request = httptest.NewRequest(http.MethodGet, "/static/application-form.js", nil)
 	response = httptest.NewRecorder()
 	application.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "repositories/browse") || !strings.Contains(response.Body.String(), "enhanceSelect") || !strings.Contains(response.Body.String(), "select.style.display = 'none'") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "repositories/browse") || !strings.Contains(response.Body.String(), "enhanceSelect") || !strings.Contains(response.Body.String(), "vite_ssr") || !strings.Contains(response.Body.String(), "select.style.display = 'none'") {
 		t.Fatalf("application form script unavailable: %d", response.Code)
 	}
 }
@@ -245,6 +245,22 @@ func TestApplicationPublicConfiguration(t *testing.T) {
 	values, err := database.ApplicationConfiguration(request.Context(), registered.ID, "production", "build")
 	if err != nil || len(values) != 1 || values[0].Value != "https://api.example.test" {
 		t.Fatalf("unexpected configuration: %#v, %v", values, err)
+	}
+}
+
+func TestDeploymentWithoutSecretsDoesNotRequireMasterKey(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "minidock.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	application, err := New(Config{Environment: "test"}, database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := application.deploymentSecrets(t.Context(), 42, "production", "runtime")
+	if err != nil || len(values) != 0 {
+		t.Fatalf("empty deployment secrets = %#v, %v", values, err)
 	}
 }
 
@@ -367,7 +383,7 @@ func TestGitHubWebhookValidatesSignatureBranchAndQueuesDeployment(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	registered, err := database.CreateApplication(t.Context(), store.Application{Name: "api", Repository: "https://example.test/api", Branch: "main", WorkDir: ".", Type: "go", BuildCommand: "build", RunCommand: "run", InternalPort: 8080, Domain: "api.example.test"})
+	registered, err := database.CreateApplication(t.Context(), store.Application{Name: "api", Repository: "https://example.test/api", Branch: "main", WorkDir: ".", Type: "go", BuildCommand: "build", RunCommand: "run", InternalPort: 8080, Domain: "api.example.test", DeployOnPush: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +433,7 @@ func TestGitHubWebhookAcceptsConfiguredTagReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registered, err := database.CreateApplication(t.Context(), store.Application{Name: "api", Repository: "https://example.test/api", Branch: "refs/tags/v1.2.0", WorkDir: ".", Type: "go", BuildCommand: "build", RunCommand: "run", InternalPort: 8080, Domain: "api.example.test"})
+	registered, err := database.CreateApplication(t.Context(), store.Application{Name: "api", Repository: "https://example.test/api", Branch: "refs/tags/v1.2.0", WorkDir: ".", Type: "go", BuildCommand: "build", RunCommand: "run", InternalPort: 8080, Domain: "api.example.test", DeployOnPush: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,7 +572,7 @@ func TestRepositoryBrowserOnlyListsConfiguredLocalRoot(t *testing.T) {
 	}
 	form = url.Values{
 		"name": {"local-code"}, "repository": {"file://" + filepath.Join(root, "new-service")}, "branch": {""}, "work_dir": {"."},
-		"type": {"custom"}, "build_command": {"docker build"}, "run_command": {"run"}, "internal_port": {"8080"}, "domain": {"local-code.example.test"},
+		"type": {"custom"}, "internal_port": {"8080"}, "domain": {"local-code.example.test"},
 	}
 	request = httptest.NewRequest(http.MethodPost, "/applications", strings.NewReader(form.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")

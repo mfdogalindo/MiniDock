@@ -212,8 +212,14 @@ func (a *App) createApplication(w http.ResponseWriter, r *http.Request) {
 		if application.RunCommand == "" {
 			application.RunCommand = "plantilla " + application.Type
 		}
+	} else if application.Type == "custom" {
+		// A custom runtime is deliberately Dockerfile-only. MiniDock must not
+		// execute arbitrary form input on the host; the commands remain stored
+		// only for compatibility with existing databases.
+		application.BuildCommand = "Dockerfile del repositorio"
+		application.RunCommand = "Dockerfile del repositorio"
 	}
-	if err != nil || application.Name == "" || application.Repository == "" || (a.requiresGitReference(application) && application.Branch == "") || application.WorkDir == "" || !runtime.IsSupported(application.Type) || (application.Type == "custom" && (application.BuildCommand == "" || application.RunCommand == "")) || application.Domain == "" || (application.Runtime != "auto" && application.Runtime != "docker" && application.Runtime != "apple") || application.InternalPort < 1 || application.InternalPort > 65535 || !a.validRepositorySource(application) {
+	if err != nil || application.Name == "" || application.Repository == "" || (a.requiresGitReference(application) && application.Branch == "") || application.WorkDir == "" || !runtime.IsSupported(application.Type) || application.Domain == "" || (application.Runtime != "auto" && !a.executor.SupportsRuntime(application.Runtime)) || application.InternalPort < 1 || application.InternalPort > 65535 || !a.validRepositorySource(application) {
 		a.renderError(w, "application_form.html", "Completa todos los campos y usa un puerto entre 1 y 65535.", applicationFormData{Application: application})
 		return
 	}
@@ -657,6 +663,11 @@ func (a *App) deploymentSecrets(ctx context.Context, applicationID int64, enviro
 	metadata, err := a.store.ApplicationSecrets(ctx, applicationID, environment, target)
 	if err != nil {
 		return nil, err
+	}
+	// Deployments without secrets must remain possible while MiniDock is locked:
+	// there is nothing to decrypt, and public configuration is safe to read.
+	if len(metadata) == 0 {
+		return map[string]string{}, nil
 	}
 	key := a.keyCopy()
 	if len(key) == 0 {

@@ -8,6 +8,8 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/minidock ./cmd/min
 FROM alpine:3.22
 RUN apk add --no-cache docker-cli git curl
 COPY --from=build /out/minidock /usr/local/bin/minidock
-RUN mkdir -p /var/lib/minidock && chown -R minidock:minidock /var/lib/minidock
+RUN addgroup -S minidock && adduser -S -D -H -G minidock minidock \
+    && mkdir -p /var/lib/minidock \
+    && chown -R minidock:minidock /var/lib/minidock
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/minidock"]

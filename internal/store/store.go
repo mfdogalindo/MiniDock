@@ -51,14 +51,35 @@ type Application struct {
 type AutomationSettings struct{ CleanupSchedule string }
 
 type Deployment struct {
-	ID            int64
-	ApplicationID int64
-	Status        string
-	Image         string
-	LogPath       string
-	StartedAt     time.Time
-	FinishedAt    time.Time
-	Action        string
+	ID                  int64
+	ApplicationID       int64
+	Status              string
+	Image               string
+	RequestedRef        string
+	SourceRevision      string
+	SourceFingerprint   string
+	ArtifactDigest      string
+	Runtime             string
+	InternalPort        int
+	HealthEndpoint      string
+	Manifest            string
+	ConfigurationDigest string
+	FailureStage        string
+	FailureCode         string
+	FailureDetail       string
+	LogPath             string
+	StartedAt           time.Time
+	FinishedAt          time.Time
+	Action              string
+}
+
+// ReleaseMetadata is provider-neutral evidence captured for a deployment.
+// Manifest and ConfigurationDigest must never contain secret values.
+type ReleaseMetadata struct {
+	RequestedRef, SourceRevision, SourceFingerprint, ArtifactDigest string
+	Runtime                                                         string
+	InternalPort                                                    int
+	HealthEndpoint, Manifest, ConfigurationDigest                   string
 }
 
 // SecretMetadata deliberately excludes the encrypted value. It is safe to
@@ -332,12 +353,11 @@ func (s *Store) DeleteApplicationConfiguration(ctx context.Context, applicationI
 }
 
 func (s *Store) CreateApplication(ctx context.Context, application Application) (Application, error) {
-	// CI/CD historically deployed the configured branch on push. Preserve that
-	// safe migration path; callers can switch to manual mode immediately after
-	// creation through UpdateApplicationAutomation.
-	if !application.DeployOnPush {
-		application.DeployOnPush = true
+	if application.DeployOnPush && application.RequireConfirmation {
+		return Application{}, errors.New("push deployments require production confirmation to be disabled")
 	}
+	// Manual deployments are the safe default. CI/CD must be enabled explicitly
+	// after the owner has chosen to disable interactive confirmation.
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO applications(name, repository, branch, work_dir, type, build_command, run_command, internal_port, domain, runtime, deploy_on_push, require_confirmation, auto_rollback, github_installation_id, created_at)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -428,7 +448,7 @@ func (s *Store) NextQueuedDeployment(ctx context.Context) (Deployment, error) {
 	defer tx.Rollback()
 	var d Deployment
 	var finished sql.NullTime
-	err = tx.QueryRowContext(ctx, `SELECT id, application_id, status, image, log_path, started_at, finished_at, action FROM deployments WHERE status = 'queued' ORDER BY id LIMIT 1`).Scan(&d.ID, &d.ApplicationID, &d.Status, &d.Image, &d.LogPath, &d.StartedAt, &finished, &d.Action)
+	err = tx.QueryRowContext(ctx, `SELECT id, application_id, status, image, requested_ref, source_revision, source_fingerprint, artifact_digest, runtime, internal_port, health_endpoint, manifest, configuration_digest, failure_stage, failure_code, failure_detail, log_path, started_at, finished_at, action FROM deployments WHERE status = 'queued' ORDER BY id LIMIT 1`).Scan(&d.ID, &d.ApplicationID, &d.Status, &d.Image, &d.RequestedRef, &d.SourceRevision, &d.SourceFingerprint, &d.ArtifactDigest, &d.Runtime, &d.InternalPort, &d.HealthEndpoint, &d.Manifest, &d.ConfigurationDigest, &d.FailureStage, &d.FailureCode, &d.FailureDetail, &d.LogPath, &d.StartedAt, &finished, &d.Action)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
 	}
@@ -459,7 +479,7 @@ func (s *Store) NextQueuedDeployment(ctx context.Context) (Deployment, error) {
 func (s *Store) PreviousSuccessfulDeployment(ctx context.Context, applicationID int64) (Deployment, error) {
 	var d Deployment
 	var finished sql.NullTime
-	err := s.db.QueryRowContext(ctx, `SELECT id, application_id, status, image, log_path, started_at, finished_at, action FROM deployments WHERE application_id = ? AND status = 'successful' AND image <> '' ORDER BY id DESC LIMIT 1 OFFSET 1`, applicationID).Scan(&d.ID, &d.ApplicationID, &d.Status, &d.Image, &d.LogPath, &d.StartedAt, &finished, &d.Action)
+	err := s.db.QueryRowContext(ctx, `SELECT id, application_id, status, image, requested_ref, source_revision, source_fingerprint, artifact_digest, runtime, internal_port, health_endpoint, manifest, configuration_digest, failure_stage, failure_code, failure_detail, log_path, started_at, finished_at, action FROM deployments WHERE application_id = ? AND status = 'successful' AND image <> '' ORDER BY id DESC LIMIT 1 OFFSET 1`, applicationID).Scan(&d.ID, &d.ApplicationID, &d.Status, &d.Image, &d.RequestedRef, &d.SourceRevision, &d.SourceFingerprint, &d.ArtifactDigest, &d.Runtime, &d.InternalPort, &d.HealthEndpoint, &d.Manifest, &d.ConfigurationDigest, &d.FailureStage, &d.FailureCode, &d.FailureDetail, &d.LogPath, &d.StartedAt, &finished, &d.Action)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
 	}
@@ -475,7 +495,7 @@ func (s *Store) PreviousSuccessfulDeployment(ctx context.Context, applicationID 
 func (s *Store) LatestSuccessfulDeployment(ctx context.Context, applicationID int64) (Deployment, error) {
 	var d Deployment
 	var finished sql.NullTime
-	err := s.db.QueryRowContext(ctx, `SELECT id, application_id, status, image, log_path, started_at, finished_at, action FROM deployments WHERE application_id = ? AND status = 'successful' AND image <> '' ORDER BY id DESC LIMIT 1`, applicationID).Scan(&d.ID, &d.ApplicationID, &d.Status, &d.Image, &d.LogPath, &d.StartedAt, &finished, &d.Action)
+	err := s.db.QueryRowContext(ctx, `SELECT id, application_id, status, image, requested_ref, source_revision, source_fingerprint, artifact_digest, runtime, internal_port, health_endpoint, manifest, configuration_digest, failure_stage, failure_code, failure_detail, log_path, started_at, finished_at, action FROM deployments WHERE application_id = ? AND status = 'successful' AND image <> '' ORDER BY id DESC LIMIT 1`, applicationID).Scan(&d.ID, &d.ApplicationID, &d.Status, &d.Image, &d.RequestedRef, &d.SourceRevision, &d.SourceFingerprint, &d.ArtifactDigest, &d.Runtime, &d.InternalPort, &d.HealthEndpoint, &d.Manifest, &d.ConfigurationDigest, &d.FailureStage, &d.FailureCode, &d.FailureDetail, &d.LogPath, &d.StartedAt, &finished, &d.Action)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
 	}
@@ -486,6 +506,9 @@ func (s *Store) LatestSuccessfulDeployment(ctx context.Context, applicationID in
 }
 
 func (s *Store) UpdateApplicationAutomation(ctx context.Context, applicationID int64, deployOnPush, requireConfirmation, autoRollback bool) error {
+	if deployOnPush && requireConfirmation {
+		return errors.New("push deployments require production confirmation to be disabled")
+	}
 	result, err := s.db.ExecContext(ctx, `UPDATE applications SET deploy_on_push = ?, require_confirmation = ?, auto_rollback = ? WHERE id = ?`, deployOnPush, requireConfirmation, autoRollback, applicationID)
 	if err != nil {
 		return err
@@ -526,8 +549,24 @@ func (s *Store) SetDeploymentImage(ctx context.Context, id int64, image string) 
 	return err
 }
 
+// SetDeploymentReleaseMetadata records reproducibility data as it becomes
+// known. This intentionally permits partial metadata: source resolution and
+// artifact creation happen in different stages and may fail independently.
+func (s *Store) SetDeploymentReleaseMetadata(ctx context.Context, id int64, metadata ReleaseMetadata) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE deployments SET requested_ref = ?, source_revision = ?, source_fingerprint = ?, artifact_digest = ?, runtime = ?, internal_port = ?, health_endpoint = ?, manifest = ?, configuration_digest = ? WHERE id = ?`,
+		metadata.RequestedRef, metadata.SourceRevision, metadata.SourceFingerprint, metadata.ArtifactDigest, metadata.Runtime, metadata.InternalPort, metadata.HealthEndpoint, metadata.Manifest, metadata.ConfigurationDigest, id)
+	return err
+}
+
+// SetDeploymentFailure records a normalized cause separately from the human
+// log, so callers never have to infer the failed phase from free-form text.
+func (s *Store) SetDeploymentFailure(ctx context.Context, id int64, stage, code, detail string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE deployments SET failure_stage = ?, failure_code = ?, failure_detail = ? WHERE id = ?`, stage, code, detail, id)
+	return err
+}
+
 func (s *Store) Deployments(ctx context.Context, applicationID int64) ([]Deployment, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, application_id, status, image, log_path, started_at, finished_at, action FROM deployments WHERE application_id = ? ORDER BY id DESC`, applicationID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, application_id, status, image, requested_ref, source_revision, source_fingerprint, artifact_digest, runtime, internal_port, health_endpoint, manifest, configuration_digest, failure_stage, failure_code, failure_detail, log_path, started_at, finished_at, action FROM deployments WHERE application_id = ? ORDER BY id DESC`, applicationID)
 	if err != nil {
 		return nil, err
 	}
@@ -536,7 +575,7 @@ func (s *Store) Deployments(ctx context.Context, applicationID int64) ([]Deploym
 	for rows.Next() {
 		var d Deployment
 		var finished sql.NullTime
-		if err := rows.Scan(&d.ID, &d.ApplicationID, &d.Status, &d.Image, &d.LogPath, &d.StartedAt, &finished, &d.Action); err != nil {
+		if err := rows.Scan(&d.ID, &d.ApplicationID, &d.Status, &d.Image, &d.RequestedRef, &d.SourceRevision, &d.SourceFingerprint, &d.ArtifactDigest, &d.Runtime, &d.InternalPort, &d.HealthEndpoint, &d.Manifest, &d.ConfigurationDigest, &d.FailureStage, &d.FailureCode, &d.FailureDetail, &d.LogPath, &d.StartedAt, &finished, &d.Action); err != nil {
 			return nil, err
 		}
 		if finished.Valid {
@@ -553,8 +592,8 @@ func (s *Store) Deployments(ctx context.Context, applicationID int64) ([]Deploym
 func (s *Store) Deployment(ctx context.Context, applicationID, id int64) (Deployment, error) {
 	var d Deployment
 	var finished sql.NullTime
-	err := s.db.QueryRowContext(ctx, `SELECT id, application_id, status, image, log_path, started_at, finished_at, action FROM deployments WHERE application_id = ? AND id = ?`, applicationID, id).Scan(
-		&d.ID, &d.ApplicationID, &d.Status, &d.Image, &d.LogPath, &d.StartedAt, &finished, &d.Action)
+	err := s.db.QueryRowContext(ctx, `SELECT id, application_id, status, image, requested_ref, source_revision, source_fingerprint, artifact_digest, runtime, internal_port, health_endpoint, manifest, configuration_digest, failure_stage, failure_code, failure_detail, log_path, started_at, finished_at, action FROM deployments WHERE application_id = ? AND id = ?`, applicationID, id).Scan(
+		&d.ID, &d.ApplicationID, &d.Status, &d.Image, &d.RequestedRef, &d.SourceRevision, &d.SourceFingerprint, &d.ArtifactDigest, &d.Runtime, &d.InternalPort, &d.HealthEndpoint, &d.Manifest, &d.ConfigurationDigest, &d.FailureStage, &d.FailureCode, &d.FailureDetail, &d.LogPath, &d.StartedAt, &finished, &d.Action)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
 	}
@@ -694,6 +733,30 @@ func (s *Store) migrate(ctx context.Context) error {
 	}
 	_, err = s.db.ExecContext(ctx, `ALTER TABLE deployments ADD COLUMN action TEXT NOT NULL DEFAULT 'deploy'`)
 	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	for _, statement := range []string{
+		`ALTER TABLE deployments ADD COLUMN requested_ref TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE deployments ADD COLUMN source_revision TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE deployments ADD COLUMN source_fingerprint TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE deployments ADD COLUMN artifact_digest TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE deployments ADD COLUMN runtime TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE deployments ADD COLUMN internal_port INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE deployments ADD COLUMN health_endpoint TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE deployments ADD COLUMN manifest TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE deployments ADD COLUMN configuration_digest TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE deployments ADD COLUMN failure_stage TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE deployments ADD COLUMN failure_code TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE deployments ADD COLUMN failure_detail TEXT NOT NULL DEFAULT ''`,
+	} {
+		_, err = s.db.ExecContext(ctx, statement)
+		if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	// A webhook cannot provide an interactive production confirmation. Older
+	// records may contain both flags, so migrate them to the safe manual mode.
+	if _, err = s.db.ExecContext(ctx, `UPDATE applications SET deploy_on_push = FALSE WHERE deploy_on_push = TRUE AND require_confirmation = TRUE`); err != nil {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS one_active_deployment_per_application ON deployments(application_id) WHERE status IN ('queued', 'running')`)

@@ -2,12 +2,14 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/julieta/minidock/internal/runtime"
 	"github.com/julieta/minidock/internal/store"
 )
 
@@ -15,6 +17,44 @@ func TestDeployRejectsUnsafeApplicationName(t *testing.T) {
 	_, err := (Executor{}).Deploy(context.Background(), store.Application{Name: "../escape"}, DeploymentConfiguration{}, io.Discard)
 	if err == nil {
 		t.Fatal("expected invalid application name to be rejected")
+	}
+}
+
+func TestSelectRuntimePrefersDockerForAutomaticDeployments(t *testing.T) {
+	available := map[string]bool{"docker": true, "apple": true}
+	got, err := selectRuntime("auto", available)
+	if err != nil || got != "docker" {
+		t.Fatalf("selectRuntime(auto) = %q, %v; want docker", got, err)
+	}
+	got, err = selectRuntime("apple", available)
+	if err != nil || got != "apple" {
+		t.Fatalf("selectRuntime(apple) = %q, %v; want apple", got, err)
+	}
+}
+
+func TestExecutorAcceptsRegisteredRuntimeAdapter(t *testing.T) {
+	executor := Executor{Adapters: map[string]RuntimeAdapter{"future": DockerAdapter{}}}
+	if !executor.SupportsRuntime("future") {
+		t.Fatal("registered runtime adapter was not exposed")
+	}
+	name, err := executor.runtime(store.Application{Runtime: "future"})
+	if err != nil || name != "future" {
+		t.Fatalf("registered runtime = %q, %v", name, err)
+	}
+}
+
+func TestFailureDetailsUsesStableStageAndCode(t *testing.T) {
+	err := failure("build", "build_failed", errors.New("exit status 1"))
+	stage, code, detail := FailureDetails(err)
+	if stage != "build" || code != "build_failed" || detail != "exit status 1" {
+		t.Fatalf("failure details = %q, %q, %q", stage, code, detail)
+	}
+}
+
+func TestEnsureDockerNetworkRequiresAName(t *testing.T) {
+	err := (Executor{}).ensureDockerNetwork(context.Background(), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("ensureDockerNetwork() = %v, want missing-network error", err)
 	}
 }
 
@@ -89,6 +129,13 @@ func TestCustomApplicationRequiresDockerfile(t *testing.T) {
 	_, _, err := generatedDockerfile(store.Application{Type: "custom"}, t.TempDir())
 	if err == nil {
 		t.Fatal("custom application without Dockerfile was accepted")
+	}
+}
+
+func TestViteSSRTemplateUsesExplicitHealthEndpoint(t *testing.T) {
+	dockerfile, ok := runtime.Dockerfile("vite_ssr", 8080)
+	if !ok || !strings.Contains(dockerfile, "127.0.0.1:'+process.env.PORT+'/healthz") {
+		t.Fatalf("Vite SSR health check is not explicit: %s", dockerfile)
 	}
 }
 

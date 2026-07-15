@@ -1,3 +1,26 @@
 {{define "dashboard.html"}}
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MiniDock</title>{{template "theme"}}</head><body><div class="shell"><header><div><p class="eyebrow">Control de infraestructura</p><h1>MiniDock</h1></div><form method="post" action="/lock"><button type="submit">Bloquear</button></form></header><main><div class="page-head"><div><p class="eyebrow">Sistema / en línea</p><h2>Estado del servidor</h2></div><a class="button" href="/operations">Operación + logs</a></div><div class="stats"><div class="stat"><span class="label">Servicio</span><strong>Disponible</strong></div><div class="stat"><span class="label">Entorno</span><strong>{{.Environment}}</strong></div></div><section class="phase"><span class="label">Fase {{.Phase.Number}}</span><br><strong>{{.Phase.Name}}</strong><br><span class="muted">{{.Phase.State}} — siguiente: {{.Phase.Next}}</span></section><section><div class="title"><div><p class="eyebrow">Registro</p><h2>Aplicaciones</h2></div><a class="button" href="/applications/new">+ Registrar</a></div>{{if .Applications}}<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Tipo</th><th>Dominio</th><th>Rama</th><th>Estado</th></tr></thead><tbody>{{range .Applications}}<tr><td><a href="/applications/{{.ID}}">{{.Name}}</a></td><td>{{.Type}}</td><td>{{.Domain}}</td><td><code>{{.Branch}}</code></td><td>→ detalle</td></tr>{{end}}</tbody></table></div>{{else}}<p class="muted">Aún no hay aplicaciones registradas.</p>{{end}}</section></main></div></body></html>
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MiniDock · by Kyberix</title>{{template "theme"}}</head>
+<body><div class="shell">
+  <header>
+    <div>
+      <p class="eyebrow">Kyberix / Control de infraestructura</p>
+      <h1>MiniDock</h1>
+      <div class="brand-signature">by <a href="https://kyberix.co/en" rel="noopener noreferrer">Kyberix</a></div>
+    </div>
+    <form method="post" action="/lock"><button type="submit">Bloquear</button></form>
+  </header>
+  <main>
+    <div class="page-head"><div><p class="eyebrow">Sistema / en línea</p><h2>Estado del servidor</h2></div><a class="button" href="/operations">Operación + logs</a></div>
+    <div class="stats"><div class="stat"><span class="label">Servicio</span><strong>Disponible</strong></div><div class="stat"><span class="label">Entorno</span><strong>{{.Environment}}</strong></div></div>
+    <section class="phase"><span class="label">Fase {{.Phase.Number}}</span><br><strong>{{.Phase.Name}}</strong><br><span class="muted">{{.Phase.State}} — siguiente: {{.Phase.Next}}</span></section>
+    <section>
+      <div class="title"><div><p class="eyebrow">Registro</p><h2>Aplicaciones</h2></div><a class="button" href="/applications/new">+ Registrar</a></div>
+      {{if .Applications}}<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Tipo</th><th>Dominio</th><th>Rama</th><th>Estado</th></tr></thead><tbody>{{range .Applications}}<tr><td><a href="/applications/{{.ID}}">{{.Name}}</a></td><td>{{.Type}}</td><td>{{.Domain}}</td><td><code>{{.Branch}}</code></td><td>→ detalle</td></tr>{{end}}</tbody></table></div>{{else}}<p class="muted">Aún no hay aplicaciones registradas.</p>{{end}}
+    </section>
+    {{template "brand-footer"}}
+  </main>
+</div></body>
+</html>
 {{end}}

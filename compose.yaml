@@ -1,6 +1,9 @@
 services:
   minidock:
     build: .
+    labels:
+      caddy: ${MINIDOCK_DOMAIN:-localhost}
+      caddy.reverse_proxy: "{{upstreams 8080}}"
     environment:
       MINIDOCK_ADDRESS: 0.0.0.0:8080
       MINIDOCK_DATABASE_PATH: /var/lib/minidock/minidock.db

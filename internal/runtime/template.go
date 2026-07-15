@@ -7,7 +7,8 @@ import (
 )
 
 // Template describes the operational defaults coupled to a generated Dockerfile.
-// All built-in services listen on PORT (8080 by default) and expose /healthz.
+// All built-in services listen on PORT (8080 by default). HTTP runtimes use a
+// health check that is explicit in their generated Dockerfile.
 type Template struct {
 	Type       string
 	Name       string
@@ -142,7 +143,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 EXPOSE {{PORT}}
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD node -e "require('http').get('http://127.0.0.1:'+process.env.PORT+'/',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD node -e "require('http').get('http://127.0.0.1:'+process.env.PORT+'/healthz',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))"
 CMD ["sh", "-c", "npm run start -- --host 0.0.0.0 --port $PORT"]
 `
 
@@ -163,7 +164,7 @@ RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server.js ./server.js
 EXPOSE {{PORT}}
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD node -e "require('http').get('http://127.0.0.1:'+process.env.PORT+'/',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD node -e "require('http').get('http://127.0.0.1:'+process.env.PORT+'/healthz',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))"
 CMD ["node", "server.js"]
 `
 

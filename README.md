@@ -1,5 +1,7 @@
 # MiniDock
 
+> An open-source deployment control plane by [Kyberix](https://kyberix.co/en).
+
 MiniDock es un servidor local de despliegues para una Mac mini. El daemon, la
 API y el panel administrativo SSR están construidos en Go.
 

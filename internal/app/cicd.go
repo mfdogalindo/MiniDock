@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/julieta/minidock/internal/deploy"
 	"github.com/julieta/minidock/internal/store"
 )
 
@@ -52,6 +53,13 @@ func (a *App) githubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !application.DeployOnPush {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	// A webhook cannot complete the interactive confirmation required for a
+	// production deployment. Older database rows may contain both flags, so
+	// enforce the invariant here as well as in the settings form.
+	if application.RequireConfirmation {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -96,8 +104,27 @@ func (a *App) queueDeployment(ctx context.Context, applicationID int64, action s
 		return err
 	}
 	logPath := filepath.Join(a.config.LogPath, fmt.Sprintf("deploy-%d-%d.log", applicationID, time.Now().UTC().UnixNano()))
-	_, err := a.store.QueueDeployment(ctx, applicationID, action, logPath)
-	return err
+	deployment, err := a.store.QueueDeployment(ctx, applicationID, action, logPath)
+	if err != nil {
+		return err
+	}
+	application, err := a.store.Application(ctx, applicationID)
+	if err != nil {
+		return err
+	}
+	manifest, err := json.Marshal(struct {
+		Version          int    `json:"version"`
+		ApplicationType  string `json:"application_type"`
+		RequestedRuntime string `json:"requested_runtime"`
+	}{Version: 1, ApplicationType: application.Type, RequestedRuntime: application.Runtime})
+	if err != nil {
+		return err
+	}
+	return a.store.SetDeploymentReleaseMetadata(ctx, deployment.ID, store.ReleaseMetadata{
+		RequestedRef: application.Branch,
+		InternalPort: application.InternalPort,
+		Manifest:     string(manifest),
+	})
 }
 
 func (a *App) StartQueue(ctx context.Context) {
@@ -193,6 +220,14 @@ func (a *App) runNextDeployment(ctx context.Context) error {
 	if err != nil {
 		status = "failed"
 		_, _ = fmt.Fprintln(logFile, "deployment error:", err)
+		stage, code, detail := deploy.FailureDetails(err)
+		if d.Action == "rollback" || d.Action == "auto_rollback" {
+			stage = "rollback"
+			if code == "" || code == "runtime_error" {
+				code = "rollback_failed"
+			}
+		}
+		_ = a.store.SetDeploymentFailure(ctx, d.ID, stage, code, detail)
 	}
 	_ = a.store.FinishDeployment(ctx, d.ID, status)
 	a.notifyDeployment(ctx, application, d, status, err)

@@ -74,6 +74,18 @@ func TestCreateAndListApplications(t *testing.T) {
 	}
 }
 
+func TestAutomationRejectsAnUnattendedDeploymentThatRequiresConfirmation(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "minidock.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	_, err = database.CreateApplication(t.Context(), Application{Name: "web", Repository: "https://github.com/example/web", Branch: "main", WorkDir: ".", Type: "static", BuildCommand: "build", RunCommand: "run", InternalPort: 8080, Domain: "web.example.test", DeployOnPush: true, RequireConfirmation: true})
+	if err == nil {
+		t.Fatal("incompatible automation settings were accepted")
+	}
+}
+
 func TestDeploymentHistory(t *testing.T) {
 	database, err := Open(filepath.Join(t.TempDir(), "minidock.db"))
 	if err != nil {
@@ -100,6 +112,36 @@ func TestDeploymentHistory(t *testing.T) {
 	}
 	if len(history) != 1 || history[0].Status != "successful" || history[0].Image != "minidock/api:1" || history[0].FinishedAt.IsZero() {
 		t.Fatalf("unexpected deployment history: %#v", history)
+	}
+}
+
+func TestDeploymentPersistsProviderNeutralReleaseMetadataAndFailure(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "minidock.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	application, err := database.CreateApplication(t.Context(), Application{Name: "api", Repository: "https://example.test/api", Branch: "main", WorkDir: ".", Type: "go", BuildCommand: "go build", RunCommand: "./api", InternalPort: 8080, Domain: "api.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := database.QueueDeployment(t.Context(), application.ID, "deploy", "deploy.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := ReleaseMetadata{RequestedRef: "main", SourceRevision: "a1b2c3", ArtifactDigest: "sha256:abc", Runtime: "docker", InternalPort: 8080, HealthEndpoint: "/healthz", Manifest: `{"version":1}`, ConfigurationDigest: "sha256:def"}
+	if err = database.SetDeploymentReleaseMetadata(t.Context(), release.ID, metadata); err != nil {
+		t.Fatal(err)
+	}
+	if err = database.SetDeploymentFailure(t.Context(), release.ID, "build", "build_failed", "exit status 1"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := database.Deployment(t.Context(), application.ID, release.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RequestedRef != metadata.RequestedRef || stored.SourceRevision != metadata.SourceRevision || stored.ArtifactDigest != metadata.ArtifactDigest || stored.Runtime != metadata.Runtime || stored.HealthEndpoint != metadata.HealthEndpoint || stored.FailureStage != "build" || stored.FailureCode != "build_failed" {
+		t.Fatalf("unexpected release record: %#v", stored)
 	}
 }
 
