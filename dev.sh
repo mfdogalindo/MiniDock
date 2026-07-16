@@ -9,5 +9,6 @@ export MINIDOCK_DATABASE_PATH="${MINIDOCK_DATABASE_PATH:-$project_root/data/mini
 export MINIDOCK_ENVIRONMENT="${MINIDOCK_ENVIRONMENT:-development}"
 
 mkdir -p data tmp
+go run github.com/a-h/templ/cmd/templ@v0.3.833 generate ./internal/app/views
 go test ./...
 exec go run ./cmd/devwatch

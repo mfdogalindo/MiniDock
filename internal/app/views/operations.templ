@@ -1,0 +1,252 @@
+package views
+
+import (
+	"fmt"
+	"github.com/julieta/minidock/internal/deploy"
+	"github.com/julieta/minidock/internal/store"
+)
+
+type OperationApplication struct {
+	Application   store.Application
+	Deployment    store.Deployment
+	HasDeployment bool
+	Container     deploy.ContainerStatus
+	Unavailable   string
+	Health        store.HealthEvidence
+}
+
+type OperationsData struct {
+	Applications                  []OperationApplication
+	Alerts                        []store.Alert
+	ResolvedAlerts                []store.Alert
+	DiskUsed                      string
+	DiskSLOCompliant              bool
+	DiskBudgetPercent             int
+	BuildSLOPercent               float64
+	BuildSLOLimitMinutes          int
+	BuildSLOCompliant             bool
+	RoutingSLOPercent             float64
+	RoutingSLOCompliant           bool
+	RetentionDays, RetainedImages int
+	CleanupSchedule               string
+	CSRFToken                     string
+	LastBackupSuccess             string
+	LastBackupError               string
+	BackupAge                     string
+	LastRestoreTest               string
+}
+
+templ Operations(data OperationsData) {
+	<!doctype html>
+	<html lang="es">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width,initial-scale=1"/>
+			<title>Operación · MiniDock</title>
+			@ThemeStyle()
+			<style>
+				.alert-list li {
+					border-left: 5px solid var(--line);
+					background: var(--panel-2);
+					padding: 12px 14px;
+					margin-bottom: 12px;
+					list-style: none;
+				}
+				.alert-list li.critical {
+					border-left-color: var(--danger);
+				}
+				.alert-list li.warning {
+					border-left-color: #ffd85c;
+				}
+			</style>
+		</head>
+		<body>
+			<main class="shell">
+				<a class="back" href="/">← Panel</a>
+				<h1>Operación y observabilidad</h1>
+				<section>
+					<h2>Cumplimiento de SLO (Nivel de Servicio)</h2>
+					<div class="stats">
+						<div class="stat">
+							<small class="eyebrow">Disponibilidad de Ruta (sondas externas)</small>
+							<strong>
+								if data.RoutingSLOCompliant {
+									<span style="color: var(--acid)">{ fmt.Sprintf("%.1f%%", data.RoutingSLOPercent) } (Sano)</span>
+								} else {
+									<span style="color: var(--danger)">{ fmt.Sprintf("%.1f%%", data.RoutingSLOPercent) } (Fuera de SLO)</span>
+								}
+							</strong>
+						</div>
+						<div class="stat">
+							<small class="eyebrow">Compilación (≤{ fmt.Sprintf("%d", data.BuildSLOLimitMinutes) } min)</small>
+							<strong>
+								if data.BuildSLOCompliant {
+									<span style="color: var(--acid)">{ fmt.Sprintf("%.1f%%", data.BuildSLOPercent) } (Sano)</span>
+								} else {
+									<span style="color: var(--danger)">{ fmt.Sprintf("%.1f%%", data.BuildSLOPercent) } (Fuera de SLO)</span>
+								}
+							</strong>
+						</div>
+						<div class="stat">
+							<small class="eyebrow">Presupuesto de Disco (≤{ fmt.Sprintf("%d", data.DiskBudgetPercent) }%)</small>
+							<strong>
+								if data.DiskSLOCompliant {
+									<span style="color: var(--acid)">{ data.DiskUsed } (Sano)</span>
+								} else {
+									<span style="color: var(--danger)">{ data.DiskUsed } (Fuera de SLO)</span>
+								}
+							</strong>
+						</div>
+					</div>
+				</section>
+				<section>
+					<h2>Estado de Backups y Restauración</h2>
+					<div class="stats">
+						<div class="stat">
+							<small class="eyebrow">Último Backup Correcto</small>
+							<strong>
+								if data.LastBackupSuccess != "" {
+									<span style="color: var(--acid)">{ data.LastBackupSuccess }</span>
+								} else {
+									<span style="color: var(--muted)">Pendiente / Ninguno</span>
+								}
+							</strong>
+						</div>
+						<div class="stat">
+							<small class="eyebrow">Antigüedad del Backup</small>
+							<strong><span>{ data.BackupAge }</span></strong>
+						</div>
+						<div class="stat">
+							<small class="eyebrow">Último Error Registrado</small>
+							<strong>
+								if data.LastBackupError != "" {
+									<span style="color: var(--danger)">{ data.LastBackupError }</span>
+								} else {
+									<span style="color: var(--acid)">Sin errores</span>
+								}
+							</strong>
+						</div>
+						<div class="stat">
+							<small class="eyebrow">Última Restauración Ensayada</small>
+							<strong><span>{ data.LastRestoreTest }</span></strong>
+						</div>
+					</div>
+				</section>
+				if len(data.Alerts) > 0 {
+					<section>
+						<h2>Alertas Activas</h2>
+						<ul class="alert-list" style="padding-left: 0;">
+							for _, alert := range data.Alerts {
+								<li class={ alert.Severity }>
+									<span class={ "status", alert.Severity }>{ alert.Severity }</span>
+									<strong>{ alert.Message }</strong>
+									<div style="margin-top: 6px;">
+										<small class="muted">Iniciada el: { alert.CreatedAt.Format("2006-01-02 15:04:05 UTC") }</small>
+										if alert.ApplicationID != nil {
+											{ " " }· <a href={ templ.SafeURL(fmt.Sprintf("/applications/%d", *alert.ApplicationID)) }>Ver aplicación →</a>
+										}
+										if alert.DeploymentID != nil && alert.ApplicationID != nil {
+											{ " " }· <a href={ templ.SafeURL(fmt.Sprintf("/applications/%d/deployments/%d/logs", *alert.ApplicationID, *alert.DeploymentID)) }>Ver log de despliegue →</a>
+										}
+									</div>
+								</li>
+							}
+						</ul>
+					</section>
+				} else {
+					<p>No hay alertas activas.</p>
+				}
+				if len(data.ResolvedAlerts) > 0 {
+					<section>
+						<h2>Alertas Resueltas Recientemente</h2>
+						<ul class="alert-list" style="padding-left: 0; opacity: 0.65;">
+							for _, alert := range data.ResolvedAlerts {
+								<li>
+									<span class="status resolved" style="color: var(--muted); border-color: var(--line);">resolved</span>
+									<strong>{ alert.Message }</strong>
+									<div style="margin-top: 6px;">
+										<small class="muted">Activa: { alert.CreatedAt.Format("2006-01-02 15:04:05 UTC") } - Resuelta: { alert.ResolvedAt.Format("2006-01-02 15:04:05 UTC") }</small>
+										if alert.ApplicationID != nil {
+											{ " " }· <a href={ templ.SafeURL(fmt.Sprintf("/applications/%d", *alert.ApplicationID)) }>Ver aplicación →</a>
+										}
+									</div>
+								</li>
+							}
+						</ul>
+					</section>
+				}
+				<section>
+					<h2>Aplicaciones</h2>
+					<div class="table-wrap">
+						<table>
+							<thead>
+								<tr>
+									<th>Aplicación</th>
+									<th>Última actividad</th>
+									<th>Estado</th>
+									<th>CPU</th>
+									<th>Memoria</th>
+									<th>Imagen</th>
+								</tr>
+							</thead>
+							<tbody>
+								for _, app := range data.Applications {
+									<tr>
+										<td><a href={ templ.SafeURL(fmt.Sprintf("/applications/%d", app.Application.ID)) }>{ app.Application.Name }</a></td>
+										<td>
+											if app.HasDeployment {
+												{ app.Deployment.StartedAt.Format("2006-01-02 15:04:05") } ({ app.Deployment.Status }) · <a href={ templ.SafeURL(fmt.Sprintf("/operations/logs?application=%d&deployment=%d", app.Application.ID, app.Deployment.ID)) }>log</a>
+											} else {
+												sin despliegues
+											}
+										</td>
+										if app.Unavailable != "" {
+											<td colspan="4">No disponible: { app.Unavailable }</td>
+										} else {
+											<td>{ app.Container.State } / { app.Container.Health }</td>
+											<td>{ app.Container.CPU }</td>
+											<td>{ app.Container.Memory }</td>
+											<td><code>{ app.Container.Image }</code></td>
+										}
+									</tr>
+								}
+							</tbody>
+						</table>
+					</div>
+				</section>
+				<section>
+					<h2>Retención</h2>
+					<p>La limpieza elimina logs y registros finalizados con más de { fmt.Sprintf("%d", data.RetentionDays) } días. Conserva al menos { fmt.Sprintf("%d", data.RetainedImages) } imágenes exitosas recientes por aplicación; Docker rechaza borrar una imagen que siga en uso.</p>
+					<div class="actions">
+						<a class="button" href="/operations/retention/preview">Revisar y ejecutar limpieza...</a>
+						<form method="post" action="/operations/cleanup-schedule">
+							<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+							<label>
+								Programación
+								<select name="cleanup_schedule">
+									<option value="manual" selected?={ data.CleanupSchedule == "manual" }>Solo manual</option>
+									<option value="daily" selected?={ data.CleanupSchedule == "daily" }>Diaria</option>
+									<option value="weekly" selected?={ data.CleanupSchedule == "weekly" }>Semanal</option>
+								</select>
+							</label>
+							<div class="form-actions">
+								<button>Guardar programación</button>
+							</div>
+						</form>
+					</div>
+				</section>
+				<section>
+					<h2>Copia de seguridad (Backup)</h2>
+					<p>Crea un backup consistente y cifrado de la base de datos de MiniDock. Requiere que el proveedor de claves esté desbloqueado en esta sesión; nunca se genera una copia en texto plano.</p>
+					<div class="actions">
+						<form method="post" action="/operations/backup">
+							<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+							<button>Respaldar base de datos</button>
+						</form>
+					</div>
+				</section>
+				@BrandFooter()
+			</main>
+		</body>
+	</html>
+}

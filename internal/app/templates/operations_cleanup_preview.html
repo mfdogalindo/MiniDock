@@ -1,0 +1,83 @@
+{{define "operations_cleanup_preview.html"}}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Vista previa de limpieza · MiniDock</title>
+  {{template "theme"}}
+</head>
+<body>
+<main class="shell">
+  <a class="back" href="/operations">← Operación</a>
+  <h1>Vista previa de limpieza</h1>
+  
+  <p class="notice">
+    Se aplicará la política de retención: conservar logs y despliegues de los últimos <strong>{{.RetentionDays}} días</strong>, 
+    y retener al menos las <strong>{{.RetainedImages}} imágenes exitosas más recientes</strong> por aplicación.
+  </p>
+
+  <div class="stats">
+    <div class="stat">
+      <small class="eyebrow">Espacio de logs estimado a liberar</small>
+      <strong>{{.TotalLogsSize}}</strong>
+    </div>
+    <div class="stat">
+      <small class="eyebrow">Imágenes a eliminar</small>
+      <strong>{{.TotalImages}}</strong>
+    </div>
+    <div class="stat">
+      <small class="eyebrow">Registros DB a depurar</small>
+      <strong>{{len .Candidates}}</strong>
+    </div>
+  </div>
+
+  {{if .Candidates}}
+    <section>
+      <h2>Elementos seleccionados para depurar</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Aplicación</th>
+              <th>Despliegue ID</th>
+              <th>Imagen Docker</th>
+              <th>Tamaño de Log</th>
+              <th>Antigüedad</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Candidates}}
+              <tr>
+                <td>{{.ApplicationName}}</td>
+                <td>#{{.DeploymentID}}</td>
+                <td>{{if .Image}}<code>{{.Image}}</code>{{else}}<span class="muted">Ninguna</span>{{end}}</td>
+                <td>{{if .LogSize}}{{.LogSize}}{{else}}<span class="muted">-</span>{{end}}</td>
+                <td>{{.AgeDays}} días</td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Confirmar acción</h2>
+      <p class="warning">⚠️ Esta acción es irreversible. Se eliminarán los archivos de log de la máquina y las imágenes seleccionadas de Docker. Las imágenes activas o en uso no se verán afectadas.</p>
+      <div class="actions" style="margin-top: 18px;">
+        <form method="post" action="/operations/retention">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <button class="danger">Confirmar y ejecutar limpieza ahora</button>
+        </form>
+        <a class="button" href="/operations" style="background: transparent; color: var(--paper); border-color: var(--line);">Cancelar</a>
+      </div>
+    </section>
+  {{else}}
+    <p class="muted">No hay artefactos ni logs que requieran limpieza según la política de retención actual.</p>
+  {{end}}
+
+  {{template "brand-footer"}}
+</main>
+</body>
+</html>
+{{end}}

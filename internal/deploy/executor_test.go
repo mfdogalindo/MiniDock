@@ -4,10 +4,15 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/julieta/minidock/internal/runtime"
 	"github.com/julieta/minidock/internal/store"
@@ -27,8 +32,8 @@ func TestSelectRuntimePrefersDockerForAutomaticDeployments(t *testing.T) {
 		t.Fatalf("selectRuntime(auto) = %q, %v; want docker", got, err)
 	}
 	got, err = selectRuntime("apple", available)
-	if err != nil || got != "apple" {
-		t.Fatalf("selectRuntime(apple) = %q, %v; want apple", got, err)
+	if err == nil || got != "" || !strings.Contains(err.Error(), "experimental") {
+		t.Fatalf("selectRuntime(apple) = %q, %v; want explicit unsupported-runtime error", got, err)
 	}
 }
 
@@ -56,6 +61,34 @@ func TestEnsureDockerNetworkRequiresAName(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("ensureDockerNetwork() = %v, want missing-network error", err)
 	}
+}
+
+func TestValidateDockerNetworkRequiresInternalBridgeAndSubnet(t *testing.T) {
+	valid := `[{"Name":"minidock","Driver":"bridge","Internal":true,"IPAM":{"Config":[{"Subnet":"172.31.251.0/24"}]}}]`
+	if err := validateDockerNetwork([]byte(valid), "minidock", "172.31.251.0/24"); err != nil {
+		t.Fatalf("valid internal bridge rejected: %v", err)
+	}
+	for _, invalid := range []string{
+		`[{"Name":"minidock","Driver":"bridge","Internal":false,"IPAM":{"Config":[{"Subnet":"172.31.251.0/24"}]}}]`,
+		`[{"Name":"minidock","Driver":"overlay","Internal":true,"IPAM":{"Config":[{"Subnet":"172.31.251.0/24"}]}}]`,
+		`[{"Name":"minidock","Driver":"bridge","Internal":true,"IPAM":{"Config":[{"Subnet":"172.31.252.0/24"}]}}]`,
+	} {
+		if err := validateDockerNetwork([]byte(invalid), "minidock", "172.31.251.0/24"); err == nil {
+			t.Fatalf("unsafe network accepted: %s", invalid)
+		}
+	}
+}
+
+func TestDockerProxyConfiguredRejectsUnixEndpoint(t *testing.T) {
+	// dev.sh sets this globally so local development can use the host daemon.
+	// This test exercises the production topology, where a raw socket is unsafe.
+	t.Setenv("MINIDOCK_ENVIRONMENT", "production")
+	t.Setenv("DOCKER_HOST", "unix:///var/run/docker.sock")
+	if err := DockerProxyConfigured(); err == nil || !strings.Contains(err.Error(), "tcp://") {
+		t.Fatalf("raw Docker endpoint accepted: %v", err)
+	}
+	// The test intentionally does not assert success: a raw socket can exist in
+	// the test host and must make the production topology fail closed.
 }
 
 func TestValidLocalRepositoryStaysWithinConfiguredRoot(t *testing.T) {
@@ -87,6 +120,52 @@ func TestLocalRepositoryGitDetection(t *testing.T) {
 	}
 	if !LocalRepositoryIsGit(root, "file://"+git) {
 		t.Fatal("Git source was not identified")
+	}
+}
+
+func TestDirectoryFingerprintIsStableAndExcludesGitMetadata(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.txt"), []byte("one"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("ref: main"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	first, err := directoryFingerprint(root)
+	if err != nil || !strings.HasPrefix(first, "sha256:") {
+		t.Fatalf("first fingerprint = %q, %v", first, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("ref: other"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := directoryFingerprint(root)
+	if err != nil || second != first {
+		t.Fatalf("git metadata changed fingerprint: %q, %v", second, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.txt"), []byte("two"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	third, err := directoryFingerprint(root)
+	if err != nil || third == first {
+		t.Fatalf("source change did not alter fingerprint: %q, %v", third, err)
+	}
+}
+
+func TestPublicConfigurationDigestIsDeterministic(t *testing.T) {
+	first := PublicConfigurationDigest(map[string]string{"PORT": "8080", "PUBLIC_URL": "https://example.test"}, map[string]string{"MODE": "production"})
+	second := PublicConfigurationDigest(map[string]string{"PUBLIC_URL": "https://example.test", "PORT": "8080"}, map[string]string{"MODE": "production"})
+	if !strings.HasPrefix(first, "sha256:") || first != second {
+		t.Fatalf("configuration digests = %q, %q", first, second)
+	}
+}
+
+func TestNonSecretRuntimeConfigurationIsJSONAndDoesNotMergeSecrets(t *testing.T) {
+	configuration := NonSecretRuntimeConfiguration(map[string]string{"MODE": "production"})
+	if configuration != `{"MODE":"production"}` {
+		t.Fatalf("runtime configuration = %q", configuration)
 	}
 }
 
@@ -133,7 +212,7 @@ func TestCustomApplicationRequiresDockerfile(t *testing.T) {
 }
 
 func TestViteSSRTemplateUsesExplicitHealthEndpoint(t *testing.T) {
-	dockerfile, ok := runtime.Dockerfile("vite_ssr", 8080)
+	dockerfile, ok := runtime.Dockerfile("vite_ssr", 8080, "/healthz")
 	if !ok || !strings.Contains(dockerfile, "127.0.0.1:'+process.env.PORT+'/healthz") {
 		t.Fatalf("Vite SSR health check is not explicit: %s", dockerfile)
 	}
@@ -169,5 +248,263 @@ func TestContainerAppRootAndKernelCheck(t *testing.T) {
 	}
 	if !hasContainerKernel(root) {
 		t.Fatal("configured kernel was not detected")
+	}
+}
+
+func TestCaddyProxyAdapterVerify(t *testing.T) {
+	calledCount := 0
+	server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calledCount++
+		if r.Host != "my-app.local" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if calledCount == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	executor := Executor{
+		ProxyURL:      server.URL,
+		HealthTimeout: 1000 * time.Millisecond,
+	}
+
+	adapter := CaddyProxyAdapter{}
+	app := store.Application{
+		Domain: "my-app.local",
+	}
+
+	ctx := context.Background()
+	err := adapter.Verify(ctx, executor, app)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if calledCount != 2 {
+		t.Fatalf("expected 2 calls, got %d", calledCount)
+	}
+
+	for _, status := range []int{http.StatusFound, http.StatusInternalServerError} {
+		server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/healthz" {
+				t.Fatalf("probe path = %q, want /healthz", r.URL.Path)
+			}
+			w.WriteHeader(status)
+		}))
+		err := adapter.Verify(ctx, Executor{ProxyURL: server.URL, HealthTimeout: 50 * time.Millisecond}, store.Application{Domain: "my-app.local", HealthEndpoint: "/healthz"})
+		server.Close()
+		if err == nil {
+			t.Fatalf("expected status %d to fail route verification", status)
+		}
+	}
+
+	redirectServer := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://my-app.local"+r.URL.Path)
+		w.WriteHeader(http.StatusPermanentRedirect)
+	}))
+	if probe := adapter.Probe(ctx, Executor{ProxyURL: redirectServer.URL, HealthTimeout: time.Second}, store.Application{Domain: "my-app.local", HealthEndpoint: "/healthz"}); !probe.Success || probe.StatusCode != http.StatusPermanentRedirect {
+		t.Fatalf("same-host Caddy HTTPS redirect = %#v, want success", probe)
+	}
+	redirectServer.Close()
+
+	externalRedirect := &http.Response{
+		StatusCode: http.StatusPermanentRedirect,
+		Header:     http.Header{"Location": {"https://attacker.example/healthz"}},
+		Request:    httptest.NewRequest(http.MethodGet, "http://caddy/healthz", nil),
+	}
+	if validCaddyHTTPSRedirect(externalRedirect, store.Application{Domain: "my-app.local"}, "/healthz") {
+		t.Fatal("cross-host redirect was accepted as Caddy route evidence")
+	}
+
+	contractServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ready" {
+			t.Fatalf("probe path = %q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("ready=minidock"))
+	}))
+	defer contractServer.Close()
+	contract := Executor{ProxyURL: contractServer.URL, HealthTimeout: time.Second, ProxyExpectedStatus: http.StatusCreated, ProxyExpectedContent: "ready=minidock"}
+	if probe := adapter.Probe(ctx, contract, store.Application{Domain: "my-app.local", HealthEndpoint: "/ready"}); !probe.Success || probe.StatusCode != http.StatusCreated || probe.Observer == "" {
+		t.Fatalf("configured contract probe = %#v", probe)
+	}
+	contract.ProxyExpectedContent = "absent"
+	if probe := adapter.Probe(ctx, contract, store.Application{Domain: "my-app.local", HealthEndpoint: "/ready"}); probe.Success {
+		t.Fatalf("content mismatch was accepted: %#v", probe)
+	}
+
+	calledCount = 0
+	failingServer := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calledCount++
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer failingServer.Close()
+
+	executorFailing := Executor{
+		ProxyURL:      failingServer.URL,
+		HealthTimeout: 50 * time.Millisecond,
+	}
+
+	err = adapter.Verify(ctx, executorFailing, app)
+	if err == nil {
+		t.Fatal("expected verify to fail on gateway errors")
+	}
+}
+
+func TestCaddyProxyAdapterApplyCreatesThenReplacesStableRoute(t *testing.T) {
+	requests := 0
+	server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/id/minidock-app-7" && r.URL.Path != "/config/apps/http/servers/srv0/routes" {
+			t.Fatalf("unexpected Caddy API path %s", r.URL.Path)
+		}
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, `{"handle":[{"handler":"reverse_proxy","upstreams":[{"dial":"172.18.0.4:8080"}]}]}`)
+			return
+		}
+		if !strings.Contains(string(mustRead(t, r.Body)), `"dial":"172.18.0.4:8080"`) {
+			t.Fatal("route did not contain requested candidate upstream")
+		}
+		if requests == 1 {
+			if r.Method != http.MethodPatch {
+				t.Fatalf("existing route method = %s, want PATCH", r.Method)
+			}
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	err := (CaddyProxyAdapter{}).Apply(context.Background(), Executor{CaddyAdminURL: server.URL}, store.Application{ID: 7, Domain: "api.example.test"}, "172.18.0.4:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 3 {
+		t.Fatalf("Caddy calls = %d, want create fallback and verification", requests)
+	}
+}
+
+func TestCaddyProxyAdapterRejectsStaleAppliedUpstream(t *testing.T) {
+	server := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, `{"handle":[{"handler":"reverse_proxy","upstreams":[{"dial":"172.18.0.3:8080"}]}]}`)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	err := (CaddyProxyAdapter{}).Apply(context.Background(), Executor{CaddyAdminURL: server.URL}, store.Application{ID: 7, Domain: "api.example.test"}, "172.18.0.4:8080")
+	if err == nil || !strings.Contains(err.Error(), "did not retain candidate upstream") {
+		t.Fatalf("stale Caddy route was accepted: %v", err)
+	}
+}
+
+func TestRuntimeEnvFileProtectsSecretAndRejectsAmbiguousValues(t *testing.T) {
+	path, err := runtimeEnvFile(t.TempDir(), map[string]string{"PUBLIC": "visible", "RUNTIME_SECRET": "canary-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("runtime env permissions = %o, want 600", info.Mode().Perm())
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(contents), "RUNTIME_SECRET=canary-secret") {
+		t.Fatalf("runtime env content = %q, %v", contents, err)
+	}
+	removeRuntimeEnvFile(path)
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("runtime env file still exists: %v", err)
+	}
+	if _, err := runtimeEnvFile(t.TempDir(), map[string]string{"SECRET": "line1\nline2"}); err == nil {
+		t.Fatal("multiline runtime secret was accepted")
+	}
+}
+
+func mustRead(t *testing.T, body io.ReadCloser) []byte {
+	t.Helper()
+	value, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
+}
+
+// newIPv4Server keeps proxy tests runnable in sandboxes where IPv6 loopback is
+// disabled, while preserving the real HTTP client/server interaction.
+func newIPv4Server(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		if errors.Is(err, syscall.EPERM) {
+			t.Skip("the current sandbox forbids loopback listeners")
+		}
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(handler)
+	server.Listener = listener
+	server.Start()
+	return server
+}
+
+func TestVerifyArtifactMissingDigestOrImage(t *testing.T) {
+	executor := Executor{}
+	app := store.Application{Name: "test-app", Runtime: "docker"}
+
+	err := executor.VerifyArtifact(context.Background(), app, "", "sha256:123")
+	stage, code, _ := FailureDetails(err)
+	if stage != "rollback" || code != "artifact_evidence_missing" {
+		t.Fatalf("expected artifact_evidence_missing, got stage=%q, code=%q", stage, code)
+	}
+
+	err = executor.VerifyArtifact(context.Background(), app, "image:v1", "")
+	stage, code, _ = FailureDetails(err)
+	if stage != "rollback" || code != "artifact_evidence_missing" {
+		t.Fatalf("expected artifact_evidence_missing, got stage=%q, code=%q", stage, code)
+	}
+}
+
+func TestVerifyArtifactMissingImageInRuntime(t *testing.T) {
+	executor := Executor{}
+	app := store.Application{Name: "test-app", Runtime: "docker"}
+
+	err := executor.VerifyArtifact(context.Background(), app, "nonexistent-image:latest", "sha256:abc")
+	if err == nil {
+		t.Fatal("expected error for nonexistent image in runtime")
+	}
+	stage, code, _ := FailureDetails(err)
+	if stage != "rollback" {
+		t.Fatalf("expected stage rollback, got %q", stage)
+	}
+	if code != "artifact_missing" && code != "runtime_unavailable" {
+		t.Fatalf("expected artifact_missing or runtime_unavailable, got code %q", code)
+	}
+}
+
+func TestValidateDockerContainerSecurityArgs(t *testing.T) {
+	safeArgs := []string{"run", "--detach", "--name", "minidock-app", "--network", "minidock", "nginx:alpine"}
+	if err := ValidateDockerContainerSecurityArgs(safeArgs); err != nil {
+		t.Fatalf("safe args rejected: %v", err)
+	}
+
+	unsafeCases := [][]string{
+		{"run", "--privileged", "nginx:alpine"},
+		{"run", "-v", "/var/run/docker.sock:/var/run/docker.sock", "nginx:alpine"},
+		{"run", "--volume=/etc:/etc", "nginx:alpine"},
+		{"run", "--network", "host", "nginx:alpine"},
+		{"run", "--device", "/dev/snd", "nginx:alpine"},
+		{"run", "--cap-add", "SYS_ADMIN", "nginx:alpine"},
+	}
+
+	for _, unsafe := range unsafeCases {
+		if err := ValidateDockerContainerSecurityArgs(unsafe); err == nil {
+			t.Fatalf("unsafe args accepted: %v", unsafe)
+		}
 	}
 }

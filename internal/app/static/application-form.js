@@ -5,6 +5,8 @@
   const steps = [...document.querySelectorAll('.step')];
   const browser = document.querySelector('#repository-browser');
   const repository = document.querySelector('#repository');
+  const name = form.elements.name;
+  const domain = form.elements.domain;
   const branch = form.elements.branch;
   const runtimeType = form.elements.type;
   const detectedRuntime = document.createElement('p');
@@ -30,6 +32,23 @@
   selectorStyle.textContent = `.custom-select{position:relative;margin-top:7px}.custom-select-trigger{width:100%;justify-content:space-between;background:#080808;color:var(--paper);border:1px solid var(--line);text-align:left}.custom-select-trigger::after{content:'↓';color:var(--acid)}.custom-select-trigger[aria-expanded="true"]{border-color:var(--acid)}.custom-select-options{position:absolute;z-index:10;left:0;right:0;max-height:16rem;overflow:auto;border:1px solid var(--acid);background:var(--panel);box-shadow:5px 5px 0 #000}.custom-select-options[hidden]{display:none}.custom-select-option{display:block;width:100%;min-height:38px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--paper);padding:.55rem .75rem;text-align:left;font:inherit;cursor:pointer}.custom-select-option:hover,.custom-select-option[aria-selected="true"]{background:var(--acid);color:var(--ink)}`;
   document.head.append(selectorStyle);
   const enhancedSelects = new Map();
+
+  const suggestedName = source => {
+    let value = source.trim().replace(/\/+$/, '');
+    try { value = new URL(value).pathname; } catch (_) {}
+    value = value.split('/').filter(Boolean).pop() || '';
+    return value.replace(/\.git$/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 63);
+  };
+  let automaticName = !name.value;
+  let automaticDomain = !domain.value;
+  const applyIdentityDefaults = () => {
+    const suggestion = suggestedName(repository.value);
+    if (automaticName && suggestion) name.value = suggestion;
+    if (automaticDomain && name.value) domain.placeholder = `${name.value}.localhost (automático)`;
+  };
+  name.addEventListener('input', event => { automaticName = !event.target.value; applyIdentityDefaults(); });
+  domain.addEventListener('input', event => { automaticDomain = !event.target.value; });
+  repository.addEventListener('input', applyIdentityDefaults);
   const enhanceSelect = select => {
     select.hidden = true;
     select.style.display = 'none';
@@ -119,6 +138,7 @@
         const select = document.createElement('button'); select.type = 'button'; select.textContent = entry.repository ? 'Usar Git' : 'Usar código';
         select.onclick = async () => {
           repository.value = data.current.replace(/^file:\/\//, 'file://') + '/' + entry.name;
+          applyIdentityDefaults();
           await detectRuntime(entry.path);
           if (!entry.repository) {
             branch.value = ''; branch.required = false; branch.placeholder = 'No se necesita para una carpeta sin Git'; references.replaceChildren(); browser.hidden = true; return;
@@ -139,6 +159,10 @@
     } catch (error) { browser.textContent = error.message; }
   };
   document.querySelector('#browse-repositories').onclick = () => browse('');
+  form.addEventListener('submit', () => {
+    applyIdentityDefaults();
+    if (!domain.value && name.value) domain.value = `${name.value}.localhost`;
+  });
   form.addEventListener('click', event => {
     if (event.target.classList.contains('next')) {
       const inputs = [...pages[current].querySelectorAll('input,select')];
@@ -146,5 +170,6 @@
     }
     if (event.target.classList.contains('previous')) show(current - 1);
   });
+  applyIdentityDefaults();
   show(0);
 })();

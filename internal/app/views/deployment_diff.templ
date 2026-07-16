@@ -1,0 +1,138 @@
+package views
+
+import (
+	"fmt"
+	"github.com/julieta/minidock/internal/store"
+)
+
+type DiffField struct {
+	Name     string
+	Current  string
+	Previous string
+	Changed  bool
+}
+
+type DeploymentDiffData struct {
+	Application store.Application
+	Deployment  store.Deployment
+	Previous    store.Deployment
+	HasPrevious bool
+	Fields      []DiffField
+	CSRFToken   string
+}
+
+templ DeploymentDiff(data DeploymentDiffData) {
+	<!doctype html>
+	<html lang="es">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width,initial-scale=1"/>
+			<title>Diferencias de Release · MiniDock</title>
+			@ThemeStyle()
+			<style>
+				.diff-table td.changed {
+					background: rgba(217, 255, 63, 0.08);
+				}
+				.diff-table td.changed code {
+					font-weight: 800;
+				}
+				.badge-changed {
+					background: var(--acid);
+					color: var(--ink);
+					font-size: 0.65rem;
+					padding: 2px 4px;
+					font-weight: 800;
+					text-transform: uppercase;
+					margin-left: 6px;
+				}
+			</style>
+		</head>
+		<body>
+			<main class="shell">
+				<a class="back" href={ templ.SafeURL(fmt.Sprintf("/applications/%d", data.Application.ID)) }>← Volver a { data.Application.Name }</a>
+				<p class="eyebrow">Trazabilidad de Release</p>
+				<h1>Comparación de Despliegue #{ fmt.Sprintf("%d", data.Deployment.ID) }</h1>
+				<p>Detalles del release solicitado el { data.Deployment.StartedAt.Format("2006-01-02 15:04:05") }</p>
+				<div class="stats" style="margin-bottom: 24px;">
+					<div class="stat">
+						<small class="eyebrow">Estado del despliegue</small>
+						<strong><span class={ "status", data.Deployment.Status }>{ data.Deployment.Status }</span></strong>
+					</div>
+					<div class="stat">
+						<small class="eyebrow">Acción</small>
+						<strong>{ data.Deployment.Action }</strong>
+					</div>
+				</div>
+				<section>
+					<h2>Comparación con el release anterior</h2>
+					if data.HasPrevious {
+						<div class="table-wrap">
+							<table class="diff-table">
+								<thead>
+									<tr>
+										<th>Parámetro</th>
+										<th>Release Anterior (#{ fmt.Sprintf("%d", data.Previous.ID) })</th>
+										<th>Release Seleccionado (#{ fmt.Sprintf("%d", data.Deployment.ID) })</th>
+									</tr>
+								</thead>
+								<tbody>
+									for _, field := range data.Fields {
+										<tr>
+											<td>
+												<strong>{ field.Name }</strong>
+												if field.Changed {
+													<span class="badge-changed">Modificado</span>
+												}
+											</td>
+											<td class={ templ.KV("changed", field.Changed) }>
+												if field.Previous != "" {
+													<code>{ field.Previous }</code>
+												} else {
+													<span class="muted">vacío / no disponible</span>
+												}
+											</td>
+											<td class={ templ.KV("changed", field.Changed) }>
+												if field.Current != "" {
+													<code>{ field.Current }</code>
+												} else {
+													<span class="muted">vacío / no disponible</span>
+												}
+											</td>
+										</tr>
+									}
+								</tbody>
+							</table>
+						</div>
+					} else {
+						<p class="muted">No hay registros de despliegues anteriores para comparar con este release.</p>
+					}
+				</section>
+				if data.Deployment.Status == "failed" || data.Deployment.Status == "successful" {
+					<section>
+						<h2>Controles de recuperación</h2>
+						<div class="actions">
+							if data.Deployment.Status == "failed" {
+								if data.Deployment.FailureStage == "start" || data.Deployment.FailureStage == "health" || data.Deployment.FailureStage == "route" {
+									<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/retry", data.Application.ID)) }>
+										<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+										<button>Reintentar desde arranque (Etapa segura)</button>
+									</form>
+								}
+								<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/deploy", data.Application.ID)) }>
+									<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+									<button class="button-secondary" style="background: transparent; color: var(--paper); border-color: var(--line);">Reintentar pipeline completo (Build nuevo)</button>
+								</form>
+							} else if data.Deployment.Status == "successful" {
+								<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/rollback", data.Application.ID)) }>
+									<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+									<button class="danger">Revertir (Rollback) a esta versión</button>
+								</form>
+							}
+						</div>
+					</section>
+				}
+				@BrandFooter()
+			</main>
+		</body>
+	</html>
+}

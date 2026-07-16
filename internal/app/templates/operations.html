@@ -1,1 +1,222 @@
-{{define "operations.html"}}<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Operación · MiniDock</title>{{template "theme"}}</head><body><main class="shell"><a class="back" href="/">← Panel</a><h1>Operación y observabilidad</h1><p>Uso de disco del host: <strong>{{.DiskUsed}}</strong></p>{{if .Alerts}}<section><h2>Alertas</h2><ul>{{range .Alerts}}<li class="{{.Severity}}">{{.Message}}</li>{{end}}</ul></section>{{else}}<p>No hay alertas activas.</p>{{end}}<section><h2>Aplicaciones</h2><div class="table-wrap"><table><thead><tr><th>Aplicación</th><th>Última actividad</th><th>Estado</th><th>CPU</th><th>Memoria</th><th>Imagen</th></tr></thead><tbody>{{range .Applications}}<tr><td><a href="/applications/{{.Application.ID}}">{{.Application.Name}}</a></td><td>{{if .HasDeployment}}{{.Deployment.StartedAt}} ({{.Deployment.Status}}) · <a href="/operations/logs?application={{.Application.ID}}&deployment={{.Deployment.ID}}">log</a>{{else}}sin despliegues{{end}}</td>{{if .Unavailable}}<td colspan="4">No disponible: {{.Unavailable}}</td>{{else}}<td>{{.Container.State}} / {{.Container.Health}}</td><td>{{.Container.CPU}}</td><td>{{.Container.Memory}}</td><td><code>{{.Container.Image}}</code></td>{{end}}</tr>{{end}}</tbody></table></div></section><section><h2>Retención</h2><p>La limpieza elimina logs y registros finalizados con más de {{.RetentionDays}} días. Conserva al menos {{.RetainedImages}} imágenes exitosas recientes por aplicación; Docker rechaza borrar una imagen que siga en uso.</p><div class="actions"><form method="post" action="/operations/retention"><button>Ejecutar limpieza ahora</button></form><form method="post" action="/operations/cleanup-schedule"><label>Programación<select name="cleanup_schedule"><option value="manual" {{if eq .CleanupSchedule "manual"}}selected{{end}}>Solo manual</option><option value="daily" {{if eq .CleanupSchedule "daily"}}selected{{end}}>Diaria</option><option value="weekly" {{if eq .CleanupSchedule "weekly"}}selected{{end}}>Semanal</option></select></label><div class="form-actions"><button>Guardar programación</button></div></form></div></section></main></body></html>{{end}}
+{{define "operations.html"}}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Operación · MiniDock</title>
+  {{template "theme"}}
+  <style>
+    .alert-list li {
+      border-left: 5px solid var(--line);
+      background: var(--panel-2);
+      padding: 12px 14px;
+      margin-bottom: 12px;
+      list-style: none;
+    }
+    .alert-list li.critical {
+      border-left-color: var(--danger);
+    }
+    .alert-list li.warning {
+      border-left-color: #ffd85c;
+    }
+  </style>
+</head>
+<body>
+<main class="shell">
+  <a class="back" href="/">← Panel</a>
+  <h1>Operación y observabilidad</h1>
+
+  <section>
+    <h2>Cumplimiento de SLO (Nivel de Servicio)</h2>
+    <div class="stats">
+      <div class="stat">
+        <small class="eyebrow">Disponibilidad de Ruta (sondas externas)</small>
+        <strong>
+          {{if .RoutingSLOCompliant}}
+            <span style="color: var(--acid)">{{printf "%.1f%%" .RoutingSLOPercent}} (Sano)</span>
+          {{else}}
+            <span style="color: var(--danger)">{{printf "%.1f%%" .RoutingSLOPercent}} (Fuera de SLO)</span>
+          {{end}}
+        </strong>
+      </div>
+      <div class="stat">
+        <small class="eyebrow">Compilación (≤{{.BuildSLOLimitMinutes}} min)</small>
+        <strong>
+          {{if .BuildSLOCompliant}}
+            <span style="color: var(--acid)">{{printf "%.1f%%" .BuildSLOPercent}} (Sano)</span>
+          {{else}}
+            <span style="color: var(--danger)">{{printf "%.1f%%" .BuildSLOPercent}} (Fuera de SLO)</span>
+          {{end}}
+        </strong>
+      </div>
+      <div class="stat">
+        <small class="eyebrow">Presupuesto de Disco (≤{{.DiskBudgetPercent}}%)</small>
+        <strong>
+          {{if .DiskSLOCompliant}}
+            <span style="color: var(--acid)">{{.DiskUsed}} (Sano)</span>
+          {{else}}
+            <span style="color: var(--danger)">{{.DiskUsed}} (Fuera de SLO)</span>
+          {{end}}
+        </strong>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Estado de Backups y Restauración</h2>
+    <div class="stats">
+      <div class="stat">
+        <small class="eyebrow">Último Backup Correcto</small>
+        <strong>
+          {{if .LastBackupSuccess}}
+            <span style="color: var(--acid)">{{.LastBackupSuccess}}</span>
+          {{else}}
+            <span style="color: var(--muted)">Pendiente / Ninguno</span>
+          {{end}}
+        </strong>
+      </div>
+      <div class="stat">
+        <small class="eyebrow">Antigüedad del Backup</small>
+        <strong><span>{{.BackupAge}}</span></strong>
+      </div>
+      <div class="stat">
+        <small class="eyebrow">Último Error Registrado</small>
+        <strong>
+          {{if .LastBackupError}}
+            <span style="color: var(--danger)">{{.LastBackupError}}</span>
+          {{else}}
+            <span style="color: var(--acid)">Sin errores</span>
+          {{end}}
+        </strong>
+      </div>
+      <div class="stat">
+        <small class="eyebrow">Última Restauración Ensayada</small>
+        <strong><span>{{.LastRestoreTest}}</span></strong>
+      </div>
+    </div>
+  </section>
+
+
+  {{if .Alerts}}
+    <section>
+      <h2>Alertas Activas</h2>
+      <ul class="alert-list" style="padding-left: 0;">
+        {{range .Alerts}}
+          <li class="{{.Severity}}">
+            <span class="status {{.Severity}}">{{.Severity}}</span>
+            <strong>{{.Message}}</strong>
+            <div style="margin-top: 6px;">
+              <small class="muted">Iniciada el: {{.CreatedAt.Format "2006-01-02 15:04:05 UTC"}}</small>
+              {{if .ApplicationID}}
+                · <a href="/applications/{{.ApplicationID}}">Ver aplicación →</a>
+              {{end}}
+              {{if .DeploymentID}}
+                · <a href="/applications/{{.ApplicationID}}/deployments/{{.DeploymentID}}/logs">Ver log de despliegue →</a>
+              {{end}}
+            </div>
+          </li>
+        {{end}}
+      </ul>
+    </section>
+  {{else}}
+    <p>No hay alertas activas.</p>
+  {{end}}
+
+  {{if .ResolvedAlerts}}
+    <section>
+      <h2>Alertas Resueltas Recientemente</h2>
+      <ul class="alert-list" style="padding-left: 0; opacity: 0.65;">
+        {{range .ResolvedAlerts}}
+          <li>
+            <span class="status resolved" style="color: var(--muted); border-color: var(--line);">resolved</span>
+            <strong>{{.Message}}</strong>
+            <div style="margin-top: 6px;">
+              <small class="muted">Activa: {{.CreatedAt.Format "2006-01-02 15:04:05 UTC"}} - Resuelta: {{.ResolvedAt.Format "2006-01-02 15:04:05 UTC"}}</small>
+              {{if .ApplicationID}}
+                · <a href="/applications/{{.ApplicationID}}">Ver aplicación →</a>
+              {{end}}
+            </div>
+          </li>
+        {{end}}
+      </ul>
+    </section>
+  {{end}}
+
+  <section>
+    <h2>Aplicaciones</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Aplicación</th>
+            <th>Última actividad</th>
+            <th>Estado</th>
+            <th>CPU</th>
+            <th>Memoria</th>
+            <th>Imagen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Applications}}
+            <tr>
+              <td><a href="/applications/{{.Application.ID}}">{{.Application.Name}}</a></td>
+              <td>
+                {{if .HasDeployment}}
+                  {{.Deployment.StartedAt}} ({{.Deployment.Status}}) · <a href="/operations/logs?application={{.Application.ID}}&deployment={{.Deployment.ID}}">log</a>
+                {{else}}
+                  sin despliegues
+                {{end}}
+              </td>
+              {{if .Unavailable}}
+                <td colspan="4">No disponible: {{.Unavailable}}</td>
+              {{else}}
+                <td>{{.Container.State}} / {{.Container.Health}}</td>
+                <td>{{.Container.CPU}}</td>
+                <td>{{.Container.Memory}}</td>
+                <td><code>{{.Container.Image}}</code></td>
+              {{end}}
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Retención</h2>
+    <p>La limpieza elimina logs y registros finalizados con más de {{.RetentionDays}} días. Conserva al menos {{.RetainedImages}} imágenes exitosas recientes por aplicación; Docker rechaza borrar una imagen que siga en uso.</p>
+    <div class="actions">
+      <a class="button" href="/operations/retention/preview">Revisar y ejecutar limpieza...</a>
+      <form method="post" action="/operations/cleanup-schedule">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <label>Programación
+          <select name="cleanup_schedule">
+            <option value="manual" {{if eq .CleanupSchedule "manual"}}selected{{end}}>Solo manual</option>
+            <option value="daily" {{if eq .CleanupSchedule "daily"}}selected{{end}}>Diaria</option>
+            <option value="weekly" {{if eq .CleanupSchedule "weekly"}}selected{{end}}>Semanal</option>
+          </select>
+        </label>
+        <div class="form-actions">
+          <button>Guardar programación</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section>
+    <h2>Copia de seguridad (Backup)</h2>
+    <p>Crea un backup consistente y cifrado de la base de datos de MiniDock. Requiere que el proveedor de claves esté desbloqueado en esta sesión; nunca se genera una copia en texto plano.</p>
+    <div class="actions">
+      <form method="post" action="/operations/backup">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button>Respaldar base de datos</button>
+      </form>
+    </div>
+  </section>
+
+  {{template "brand-footer"}}
+</main>
+</body>
+</html>
+{{end}}

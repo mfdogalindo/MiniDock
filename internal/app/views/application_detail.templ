@@ -1,0 +1,416 @@
+package views
+
+import (
+	"fmt"
+	"github.com/julieta/minidock/internal/deploy"
+	"github.com/julieta/minidock/internal/store"
+)
+
+type PreflightItem struct {
+	Name    string
+	OK      bool
+	Details string
+	Impact  string
+	Action  string
+}
+
+type PreflightCheckResult struct {
+	AllOK        bool
+	Docker       PreflightItem
+	Caddy        PreflightItem
+	Network      PreflightItem
+	DiskSpace    PreflightItem
+	RepoAccess   PreflightItem
+	DomainHealth PreflightItem
+}
+
+type PipelineStatus struct {
+	Deployment      store.Deployment
+	HasDeployment   bool
+	PreflightFailed bool
+	Step1State      string
+	Step1Msg        string
+	Step2State      string
+	Step2Msg        string
+	Step3State      string
+	Step3Msg        string
+	Step4State      string
+	Step4Msg        string
+	Step5State      string
+	Step5Msg        string
+	Step6State      string
+	Step6Msg        string
+}
+
+type ApplicationDetailData struct {
+	Application     store.Application
+	Deployments     []store.Deployment
+	DeployedVersion string
+	Container       deploy.ContainerStatus
+	ContainerError  string
+	LogPreview      string
+	LogPreviewError string
+	RuntimeNotice   string
+	Phase           PhaseStatus
+	Pipeline        PipelineStatus
+	CSRFToken       string
+	HasSecrets      bool
+	HealthEvidence  store.HealthEvidence
+	Preflight       PreflightCheckResult
+	Notice          string
+	Error           string
+}
+
+templ ApplicationDetail(data ApplicationDetailData) {
+	<!doctype html>
+	<html lang="es">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width,initial-scale=1"/>
+			<title>{ data.Application.Name } · MiniDock · by Kyberix</title>
+			@ThemeStyle()
+			<script src="/static/deployment-log.js" defer></script>
+		</head>
+		<body>
+			<main class="shell">
+				<a class="back" href="/">← Panel</a>
+				<div class="page-head">
+					<div>
+						<p class="eyebrow">Aplicación / { data.Application.Type }</p>
+						<h1>{ data.Application.Name }</h1>
+						<p><code>{ data.Application.Repository }</code> · <code>{ data.Application.Branch }</code> · { data.Application.Domain }</p>
+					</div>
+					<a class="button" href={ templ.SafeURL(fmt.Sprintf("/applications/%d/secrets", data.Application.ID)) }>Secretos</a>
+				</div>
+				if data.Notice != "" {
+					<p class="notice" role="status">{ data.Notice }</p>
+				}
+				if data.Error != "" {
+					<p class="error" role="alert">{ data.Error }</p>
+				}
+				if data.RuntimeNotice != "" {
+					<p class="notice">{ data.RuntimeNotice }</p>
+				}
+				<section>
+					<div class="title">
+						<div>
+							<p class="eyebrow">Entrega más reciente</p>
+							<h2>Pipeline</h2>
+						</div>
+						if data.Pipeline.HasDeployment {
+							<span class={ "status", data.Pipeline.Deployment.Status }>{ data.Pipeline.Deployment.Status }</span>
+						}
+					</div>
+					if data.Pipeline.HasDeployment {
+						<p class="muted">
+							{ data.Pipeline.Deployment.Action } iniciado { data.Pipeline.Deployment.StartedAt.Format("2006-01-02 15:04:05") } ·{ " " }
+							<a href={ templ.SafeURL(fmt.Sprintf("/applications/%d/deployments/%d/logs", data.Application.ID, data.Pipeline.Deployment.ID)) }>Abrir log completo →</a>
+						</p>
+						if data.Pipeline.Deployment.Status == "queued" || data.Pipeline.Deployment.Status == "running" {
+							<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/deployments/%d/cancel", data.Application.ID, data.Pipeline.Deployment.ID)) }>
+								<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+								<button class="danger">
+									if data.Pipeline.Deployment.Status == "running" {
+										Cancelar despliegue en ejecución
+									} else {
+										Cancelar despliegue en cola
+									}
+								</button>
+							</form>
+						}
+						<div class="pipeline">
+							<div class={ "pipeline-step", data.Pipeline.Step1State }><small>01</small><b>Entorno</b><small>{ data.Pipeline.Step1Msg }</small></div>
+							<div class={ "pipeline-step", data.Pipeline.Step2State }><small>02</small><b>Origen</b><small>{ data.Pipeline.Step2Msg }</small></div>
+							<div class={ "pipeline-step", data.Pipeline.Step3State }><small>03</small><b>Build</b><small>{ data.Pipeline.Step3Msg }</small></div>
+							<div class={ "pipeline-step", data.Pipeline.Step4State }><small>04</small><b>Deploy</b><small>{ data.Pipeline.Step4Msg }</small></div>
+							<div class={ "pipeline-step", data.Pipeline.Step5State }><small>05</small><b>Health check</b><small>{ data.Pipeline.Step5Msg }</small></div>
+							<div class={ "pipeline-step", data.Pipeline.Step6State }><small>06</small><b>Ruta proxy</b><small>{ data.Pipeline.Step6Msg }</small></div>
+						</div>
+						<div class="log-preview" aria-label="Vista previa del log de despliegue" data-deployment-log-url={ fmt.Sprintf("/applications/%d/deployments/%d/logs", data.Application.ID, data.Pipeline.Deployment.ID) } data-deployment-log-stream-url={ fmt.Sprintf("/applications/%d/deployments/%d/log-stream", data.Application.ID, data.Pipeline.Deployment.ID) } data-deployment-status={ data.Pipeline.Deployment.Status }>
+							<div class="title">
+								<h3>Log reciente</h3>
+								<a href={ templ.SafeURL(fmt.Sprintf("/applications/%d/deployments/%d/logs", data.Application.ID, data.Pipeline.Deployment.ID)) }>Ver completo →</a>
+							</div>
+							if data.LogPreview != "" {
+								<pre>{ data.LogPreview }</pre>
+							} else {
+								<p class="muted">{ data.LogPreviewError }</p>
+							}
+						</div>
+						if data.Pipeline.Deployment.Status == "failed" {
+							<div class="actions" style="margin-top:18px">
+								<a class="button" href={ templ.SafeURL(fmt.Sprintf("/applications/%d/deployments/%d/logs", data.Application.ID, data.Pipeline.Deployment.ID)) }>Revisar fallo</a>
+								if data.Pipeline.Deployment.FailureStage == "start" || data.Pipeline.Deployment.FailureStage == "health" || data.Pipeline.Deployment.FailureStage == "route" {
+									<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/retry", data.Application.ID)) } style="display:inline;">
+										<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+										<button>Reintentar desde etapa segura (Arranque)</button>
+									</form>
+								}
+								if data.Application.RequireConfirmation {
+									<a class="button" href="#production-confirmation">Reintentar con confirmación</a>
+								} else {
+									<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/deploy", data.Application.ID)) } style="display:inline;">
+										<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+										<button>Reintentar pipeline completo</button>
+									</form>
+								}
+							</div>
+						}
+					} else {
+						<p class="muted">Aún no hay ejecuciones. El primer despliegue crea la imagen y el contenedor; «Iniciar» solo sirve para un contenedor ya creado.</p>
+						<div class="actions">
+							if data.Application.RequireConfirmation {
+								<a class="button" href="#production-confirmation">Preparar primer despliegue →</a>
+							} else {
+								<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/deploy", data.Application.ID)) }>
+									<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+									<button>Preparar y desplegar</button>
+								</form>
+							}
+						</div>
+					}
+				</section>
+				<section>
+					<p class="eyebrow">Telemetría</p>
+					<h2>Estado actual</h2>
+					if data.ContainerError != "" {
+						<p class="error">{ data.ContainerError }</p>
+					} else {
+						<dl>
+							<dt>Estado</dt>
+							<dd>{ data.Container.State }</dd>
+							<dt>Health</dt>
+							<dd>{ data.Container.Health }</dd>
+							<dt>Imagen activa</dt>
+							<dd><code>{ data.Container.Image }</code></dd>
+							<dt>Iniciado</dt>
+							<dd>{ data.Container.StartedAt }</dd>
+							<dt>CPU</dt>
+							<dd>{ data.Container.CPU }</dd>
+							<dt>Memoria</dt>
+							<dd>{ data.Container.Memory }</dd>
+							<dt>Health interno</dt>
+							<dd>{ data.HealthEvidence.InternalStatus } · { data.HealthEvidence.InternalCheckedAt.Format("2006-01-02 15:04:05") }</dd>
+							<dt>Ruta aplicada</dt>
+							<dd>{ data.HealthEvidence.RouteStatus } · { data.HealthEvidence.RouteCheckedAt.Format("2006-01-02 15:04:05") }</dd>
+							<dt>Última sonda externa</dt>
+							<dd>{ data.HealthEvidence.ExternalStatus } (HTTP { fmt.Sprintf("%d", data.HealthEvidence.ExternalHTTPStatus) }) · { data.HealthEvidence.ExternalCheckedAt.Format("2006-01-02 15:04:05") } desde { data.HealthEvidence.ExternalObserver }</dd>
+						</dl>
+					}
+					<p>
+						Última versión exitosa:{ " " }
+						if data.DeployedVersion != "" {
+							<code>{ data.DeployedVersion }</code>
+						} else {
+							aún no hay una
+						}
+					</p>
+				</section>
+				<section>
+					<div class="title">
+						<div>
+							<p class="eyebrow">Diagnóstico previo al despliegue</p>
+							<h2>Preflight Check</h2>
+						</div>
+						if data.Preflight.AllOK {
+							<span class="status successful">Listo para despliegue</span>
+						} else {
+							<span class="status failed">Atención requerida</span>
+						}
+					</div>
+					<dl>
+						<dt>{ data.Preflight.Docker.Name }</dt>
+						<dd>
+							if data.Preflight.Docker.OK {
+								✅
+							} else {
+								❌
+							}{ " " }{ data.Preflight.Docker.Details }
+							if !data.Preflight.Docker.OK {
+								<br/><strong>Siguiente paso:</strong>{ " " }{ data.Preflight.Docker.Action }
+							}
+						</dd>
+						<dt>{ data.Preflight.Caddy.Name }</dt>
+						<dd>
+							if data.Preflight.Caddy.OK {
+								✅
+							} else {
+								❌
+							}{ " " }{ data.Preflight.Caddy.Details }
+							if !data.Preflight.Caddy.OK {
+								<br/><strong>Siguiente paso:</strong>{ " " }{ data.Preflight.Caddy.Action }
+							}
+						</dd>
+						<dt>{ data.Preflight.Network.Name }</dt>
+						<dd>
+							if data.Preflight.Network.OK {
+								✅
+							} else {
+								❌
+							}{ " " }{ data.Preflight.Network.Details }
+							if !data.Preflight.Network.OK {
+								<br/><strong>Siguiente paso:</strong>{ " " }{ data.Preflight.Network.Action }
+							}
+						</dd>
+						<dt>{ data.Preflight.DiskSpace.Name }</dt>
+						<dd>
+							if data.Preflight.DiskSpace.OK {
+								✅
+							} else {
+								❌
+							}{ " " }{ data.Preflight.DiskSpace.Details }
+							if !data.Preflight.DiskSpace.OK {
+								<br/><strong>Siguiente paso:</strong>{ " " }{ data.Preflight.DiskSpace.Action }
+							}
+						</dd>
+						<dt>{ data.Preflight.RepoAccess.Name }</dt>
+						<dd>
+							if data.Preflight.RepoAccess.OK {
+								✅
+							} else {
+								❌
+							}{ " " }{ data.Preflight.RepoAccess.Details }
+							if !data.Preflight.RepoAccess.OK {
+								<br/><strong>Siguiente paso:</strong>{ " " }{ data.Preflight.RepoAccess.Action }
+							}
+						</dd>
+						<dt>{ data.Preflight.DomainHealth.Name }</dt>
+						<dd>
+							if data.Preflight.DomainHealth.OK {
+								✅
+							} else {
+								❌
+							}{ " " }{ data.Preflight.DomainHealth.Details }
+							if !data.Preflight.DomainHealth.OK {
+								<br/><strong>Siguiente paso:</strong>{ " " }{ data.Preflight.DomainHealth.Action }
+							}
+						</dd>
+					</dl>
+				</section>
+				<section>
+					<div class="title">
+						<div>
+							<p class="eyebrow">Exposición Externa</p>
+							<h2>Cloudflare Tunnel & Dominio Público</h2>
+						</div>
+						<a class="button" href="/cloudflare">Panel Cloudflare</a>
+					</div>
+					<p class="muted">Expon esta aplicación hacia Internet mediante un túnel seguro sin abrir puertos en tu router.</p>
+					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/domain", data.Application.ID)) } style="margin-top: 14px;">
+						<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+						<label for="app_domain" style="margin-top: 0;">Dominio Asignado a esta Aplicación</label>
+						<div style="display: flex; gap: 10px; align-items: center; margin-top: 6px;">
+							<input type="text" id="app_domain" name="domain" value={ data.Application.Domain } placeholder="ejemplo: demo.kyberix.co" required style="margin-top: 0; flex: 1;" />
+							<button type="submit" class="button">Guardar Dominio</button>
+						</div>
+						<p class="hint">Para salir a Internet por Cloudflare, cambia <code>demo.local</code> por tu subdominio real (ejemplo: <code>demo.kyberix.co</code>).</p>
+					</form>
+				</section>
+				<section id="production-confirmation">
+					<p class="eyebrow">Controles</p>
+					if !data.Preflight.AllOK {
+						<p class="error">El despliegue está pausado hasta resolver el preflight. Puedes seguir editando configuración y secretos.</p>
+					}
+					if data.Application.RequireConfirmation {
+						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/deploy", data.Application.ID)) }>
+							<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+							<label>
+								Confirmar producción: escribe <code>{ data.Application.Name }</code>
+								<input name="confirm_production" required/>
+							</label>
+							<div class="form-actions">
+								<button disabled?={ !data.Preflight.AllOK }>Desplegar</button>
+							</div>
+						</form>
+					} else {
+						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/deploy", data.Application.ID)) }>
+							<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+							<button disabled?={ !data.Preflight.AllOK }>Desplegar</button>
+						</form>
+					}
+					<div class="actions">
+						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/rollback", data.Application.ID)) } onsubmit="return confirm('¿Confirmas restaurar la última versión exitosa (Rollback)?');">
+							<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+							<button>Rollback</button>
+						</form>
+						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/start", data.Application.ID)) }>
+							<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+							<button>Iniciar contenedor existente</button>
+						</form>
+						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/restart", data.Application.ID)) }>
+							<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+							<button>Reiniciar contenedor existente</button>
+						</form>
+						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/stop", data.Application.ID)) } onsubmit="return confirm('¿Confirmas detener el contenedor?');">
+							<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+							<button class="danger">Detener contenedor</button>
+						</form>
+						<a class="button" href={ templ.SafeURL(fmt.Sprintf("/applications/%d/logs", data.Application.ID)) }>Ver logs del contenedor</a>
+					</div>
+				</section>
+				<section>
+					<p class="eyebrow">Automatización</p>
+					<h2>Reglas de entrega</h2>
+					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/applications/%d/automation", data.Application.ID)) }>
+						<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+						<label>
+							<input type="checkbox" name="deploy_on_push" checked?={ data.Application.DeployOnPush }/> Desplegar al recibir push en <code>{ data.Application.Branch }</code>
+						</label>
+						if data.HasSecrets {
+							<p class="warning-inline" style="color:#a30;font-size:.85rem;margin: 2px 0 8px 0;">⚠️ Esta aplicación contiene secretos. Si MiniDock está bloqueado (Operación asistida), las entregas automáticas por push fallarán/serán rechazadas.</p>
+						}
+						<label>
+							<input type="checkbox" name="require_confirmation" checked?={ data.Application.RequireConfirmation }/> Pedir confirmación antes de producción
+						</label>
+						<label>
+							<input type="checkbox" name="auto_rollback" checked?={ data.Application.AutoRollback }/> Restaurar la última versión exitosa tras un health check fallido
+						</label>
+						<p class="hint">La entrega por push y la confirmación interactiva son excluyentes.</p>
+						<div class="form-actions">
+							<button>Guardar reglas</button>
+						</div>
+					</form>
+				</section>
+				<section>
+					<p class="eyebrow">Trazabilidad</p>
+					<h2>Historial de despliegues</h2>
+					if len(data.Deployments) > 0 {
+						<div class="table-wrap">
+							<table>
+								<thead>
+									<tr>
+										<th>Inicio</th>
+										<th>Acción</th>
+										<th>Estado</th>
+										<th>Imagen</th>
+										<th>Evidencia / Diferencias</th>
+										<th>Log</th>
+									</tr>
+								</thead>
+								<tbody>
+									for _, dep := range data.Deployments {
+										<tr>
+											<td>{ dep.StartedAt.Format("2006-01-02 15:04:05") }</td>
+											<td>{ dep.Action }</td>
+											<td><span class={ "status", dep.Status }>{ dep.Status }</span></td>
+											<td><code>{ dep.Image }</code></td>
+											<td>
+												<a href={ templ.SafeURL(fmt.Sprintf("/applications/%d/deployments/%d/release-report", data.Application.ID, dep.ID)) }>Informe JSON →</a>
+												<br/>
+												<a href={ templ.SafeURL(fmt.Sprintf("/applications/%d/deployments/%d/diff", data.Application.ID, dep.ID)) } style="font-size: 0.85rem;">Diff vs previo →</a>
+											</td>
+											<td><a href={ templ.SafeURL(fmt.Sprintf("/applications/%d/deployments/%d/logs", data.Application.ID, dep.ID)) }>Ver →</a></td>
+										</tr>
+									}
+								</tbody>
+							</table>
+						</div>
+					} else {
+						<p class="muted">Aún no hay despliegues.</p>
+					}
+				</section>
+				@BrandFooter()
+			</main>
+		</body>
+	</html>
+}

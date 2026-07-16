@@ -11,7 +11,7 @@ func TestBuiltInTemplatesHaveOperationalDefaults(t *testing.T) {
 		if !ok || template.CPUs == "" || template.Memory == "" {
 			t.Fatalf("%s has no resource limits", kind)
 		}
-		dockerfile, ok := Dockerfile(kind, 9090)
+		dockerfile, ok := Dockerfile(kind, 9090, "")
 		if !ok || !strings.Contains(dockerfile, "HEALTHCHECK") || !strings.Contains(dockerfile, "9090") {
 			t.Fatalf("%s does not render health check and port: %s", kind, dockerfile)
 		}
@@ -19,7 +19,7 @@ func TestBuiltInTemplatesHaveOperationalDefaults(t *testing.T) {
 }
 
 func TestCustomIsNotAGeneratedTemplate(t *testing.T) {
-	if _, ok := Dockerfile("custom", 8080); ok {
+	if _, ok := Dockerfile("custom", 8080, ""); ok {
 		t.Fatal("custom must require a Dockerfile")
 	}
 }

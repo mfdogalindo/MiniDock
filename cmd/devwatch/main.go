@@ -141,7 +141,7 @@ func relevant(path string) bool {
 		return false
 	}
 	extension := filepath.Ext(path)
-	return extension == ".go" || extension == ".html"
+	return extension == ".go" || extension == ".html" || extension == ".templ"
 }
 
 func fatal(err error) {

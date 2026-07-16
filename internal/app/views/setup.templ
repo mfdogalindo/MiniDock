@@ -1,0 +1,36 @@
+package views
+
+templ Setup(errMsg string) {
+	<!doctype html>
+	<html lang="es">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width,initial-scale=1"/>
+			<title>Configurar MiniDock · by Kyberix</title>
+			@ThemeStyle()
+		</head>
+		<body>
+			<main class="narrow">
+				<p class="eyebrow">Kyberix / 01 / Inicialización</p>
+				<h1>Configurar<br/>MiniDock</h1>
+				<div class="brand-signature">by <a href="https://kyberix.co/en" rel="noopener noreferrer">Kyberix</a></div>
+				<p>Define la contraseña maestra. No se almacena y será necesaria tras reiniciar el servicio.</p>
+				if errMsg != "" {
+					<p class="error">{ errMsg }</p>
+				}
+				<section>
+					<form method="post" action="/setup">
+						<label for="password">Contraseña maestra</label>
+						<input id="password" name="password" type="password" minlength="12" required autofocus/>
+						<label for="password_confirmation">Confirmar contraseña</label>
+						<input id="password_confirmation" name="password_confirmation" type="password" minlength="12" required/>
+						<div class="form-actions">
+							<button type="submit">Inicializar →</button>
+						</div>
+					</form>
+				</section>
+				@BrandFooter()
+			</main>
+		</body>
+	</html>
+}

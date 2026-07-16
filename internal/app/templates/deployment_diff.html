@@ -1,0 +1,102 @@
+{{define "deployment_diff.html"}}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Diferencias de Release · MiniDock</title>
+  {{template "theme"}}
+  <style>
+    .diff-table td.changed {
+      background: rgba(217, 255, 63, 0.08);
+    }
+    .diff-table td.changed code {
+      font-weight: 800;
+    }
+    .badge-changed {
+      background: var(--acid);
+      color: var(--ink);
+      font-size: 0.65rem;
+      padding: 2px 4px;
+      font-weight: 800;
+      text-transform: uppercase;
+      margin-left: 6px;
+    }
+  </style>
+</head>
+<body>
+<main class="shell">
+  <a class="back" href="/applications/{{.Application.ID}}">← Volver a {{.Application.Name}}</a>
+  <p class="eyebrow">Trazabilidad de Release</p>
+  <h1>Comparación de Despliegue #{{.Deployment.ID}}</h1>
+  <p>Detalles del release solicitado el {{.Deployment.StartedAt}}</p>
+
+  <div class="stats" style="margin-bottom: 24px;">
+    <div class="stat">
+      <small class="eyebrow">Estado del despliegue</small>
+      <strong><span class="status {{.Deployment.Status}}">{{.Deployment.Status}}</span></strong>
+    </div>
+    <div class="stat">
+      <small class="eyebrow">Acción</small>
+      <strong>{{.Deployment.Action}}</strong>
+    </div>
+  </div>
+
+  <section>
+    <h2>Comparación con el release anterior</h2>
+    {{if .HasPrevious}}
+      <div class="table-wrap">
+        <table class="diff-table">
+          <thead>
+            <tr>
+              <th>Parámetro</th>
+              <th>Release Anterior (#{{.Previous.ID}})</th>
+              <th>Release Seleccionado (#{{.Deployment.ID}})</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Fields}}
+              <tr>
+                <td><strong>{{.Name}}</strong>{{if .Changed}}<span class="badge-changed">Modificado</span>{{end}}</td>
+                <td {{if .Changed}}class="changed"{{end}}>{{if .Previous}}<code>{{.Previous}}</code>{{else}}<span class="muted">vacío / no disponible</span>{{end}}</td>
+                <td {{if .Changed}}class="changed"{{end}}>{{if .Current}}<code>{{.Current}}</code>{{else}}<span class="muted">vacío / no disponible</span>{{end}}</td>
+              </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{else}}
+      <p class="muted">No hay registros de despliegues anteriores para comparar con este release.</p>
+    {{end}}
+  </section>
+
+  {{if or (eq .Deployment.Status "failed") (eq .Deployment.Status "successful")}}
+    <section>
+      <h2>Controles de recuperación</h2>
+      <div class="actions">
+        {{if eq .Deployment.Status "failed"}}
+          {{if or (eq .Deployment.FailureStage "start") (eq .Deployment.FailureStage "health") (eq .Deployment.FailureStage "route")}}
+            <form method="post" action="/applications/{{.Application.ID}}/retry">
+              <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+              <button>Reintentar desde arranque (Etapa segura)</button>
+            </form>
+          {{end}}
+          <form method="post" action="/applications/{{.Application.ID}}/deploy">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <button class="button-secondary" style="background: transparent; color: var(--paper); border-color: var(--line);">Reintentar pipeline completo (Build nuevo)</button>
+          </form>
+        {{else if eq .Deployment.Status "successful"}}
+          <form method="post" action="/applications/{{.Application.ID}}/rollback">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <button class="danger">Revertir (Rollback) a esta versión</button>
+          </form>
+        {{end}}
+      </div>
+    </section>
+  {{end}}
+
+  {{template "brand-footer"}}
+</main>
+</body>
+</html>
+{{end}}

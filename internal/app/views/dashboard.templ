@@ -1,0 +1,171 @@
+package views
+
+import (
+	"fmt"
+	"github.com/julieta/minidock/internal/store"
+)
+
+type PhaseStatus struct {
+	Number            int
+	Name, State, Next string
+}
+
+type DashboardData struct {
+	Environment  string
+	Applications []store.Application
+	Nodes        []store.Node
+	Phase        PhaseStatus
+	CSRFToken    string
+	HostReadiness HostReadinessData
+}
+
+templ Dashboard(data DashboardData) {
+	<!doctype html>
+	<html lang="es">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width,initial-scale=1"/>
+			<title>MiniDock · by Kyberix</title>
+			@ThemeStyle()
+		</head>
+		<body>
+			<div class="shell">
+				<header>
+					<div>
+						<p class="eyebrow">Kyberix / Control de infraestructura</p>
+						<h1>MiniDock</h1>
+						<div class="brand-signature">by <a href="https://kyberix.co/en" rel="noopener noreferrer">Kyberix</a></div>
+					</div>
+					<form method="post" action="/lock">
+						<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+						<button type="submit">Bloquear</button>
+					</form>
+				</header>
+				<main>
+					<div class="page-head">
+						<div>
+							<p class="eyebrow">Sistema / en línea</p>
+							<h2>Estado del servidor</h2>
+						</div>
+						<div class="actions">
+							<a class="button" href="/cloudflare">Cloudflare Tunnel</a>
+							<a class="button" href="/operations">Operación + logs</a>
+						</div>
+					</div>
+					<div class="stats">
+						<div class="stat">
+							<span class="label">Servicio</span>
+							<strong>Disponible</strong>
+						</div>
+						<div class="stat">
+							<span class="label">Entorno</span>
+							<strong>{ data.Environment }</strong>
+						</div>
+					</div>
+					<section>
+						<div class="title">
+							<div>
+								<p class="eyebrow">Antes del primer despliegue</p>
+								<h2>Preparación del host</h2>
+							</div>
+							if data.HostReadiness.AllOK {
+								<span class="status successful">Listo para desplegar</span>
+							} else {
+								<a class="button" href="/">Comprobar otra vez</a>
+							}
+						</div>
+						@HostReadiness(data.HostReadiness)
+						if !data.HostReadiness.AllOK {
+							<p class="hint">Puedes registrar y configurar aplicaciones ahora. MiniDock solo impedirá iniciar el despliegue hasta que el host esté listo.</p>
+						}
+					</section>
+					<section class="phase">
+						<span class="label">Fase { fmt.Sprintf("%d", data.Phase.Number) }</span>
+						<br/>
+						<strong>{ data.Phase.Name }</strong>
+						<br/>
+						<span class="muted">{ data.Phase.State } — siguiente: { data.Phase.Next }</span>
+					</section>
+					<section>
+						<div class="title">
+							<div>
+								<p class="eyebrow">Malla privada</p>
+								<h2>Nodos remotos</h2>
+							</div>
+						</div>
+						if len(data.Nodes) > 0 {
+							<div class="table-wrap">
+								<table>
+									<thead>
+										<tr>
+											<th>Nombre</th>
+											<th>ID</th>
+											<th>Versión</th>
+											<th>Capacidades</th>
+											<th>Última señal</th>
+										</tr>
+									</thead>
+									<tbody>
+										for _, node := range data.Nodes {
+											<tr>
+												<td>{ node.Name }</td>
+												<td><code>{ node.ID }</code></td>
+												<td>{ node.Version }</td>
+												<td>
+													for _, cap := range node.Capabilities {
+														<code>{ cap }</code>{ " " }
+													}
+												</td>
+												<td>{ node.LastSeenAt.Format("2006-01-02 15:04:05") }</td>
+											</tr>
+										}
+									</tbody>
+								</table>
+							</div>
+						} else {
+							<p class="muted">No hay agentes registrados. El control remoto permanece desactivado hasta configurar mTLS y WireGuard.</p>
+						}
+					</section>
+					<section>
+						<div class="title">
+							<div>
+								<p class="eyebrow">Registro</p>
+								<h2>Aplicaciones</h2>
+							</div>
+							<a class="button" href="/applications/new">+ Registrar</a>
+						</div>
+						if len(data.Applications) > 0 {
+							<div class="table-wrap">
+								<table>
+									<thead>
+										<tr>
+											<th>Nombre</th>
+											<th>Tipo</th>
+											<th>Dominio</th>
+											<th>Rama</th>
+											<th>Estado</th>
+										</tr>
+									</thead>
+									<tbody>
+										for _, app := range data.Applications {
+											<tr>
+												<td><a href={ templ.SafeURL(fmt.Sprintf("/applications/%d", app.ID)) }>{ app.Name }</a></td>
+												<td>{ app.Type }</td>
+												<td>{ app.Domain }</td>
+												<td><code>{ app.Branch }</code></td>
+												<td>→ detalle</td>
+											</tr>
+										}
+									</tbody>
+								</table>
+							</div>
+						} else {
+							<p class="muted">Aún no hay aplicaciones registradas.</p>
+						}
+					</section>
+					@BrandFooter()
+				</main>
+			</div>
+		</body>
+	</html>
+}

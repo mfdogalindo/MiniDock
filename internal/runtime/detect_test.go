@@ -3,6 +3,7 @@ package runtime
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -36,5 +37,25 @@ func TestDetectFrameworksWithoutExecutingProjectCode(t *testing.T) {
 				t.Fatalf("Detect() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestValidateRuntimePrerequisites(t *testing.T) {
+	path := t.TempDir()
+
+	// Test Go validation
+	if errs := Validate(path, "go"); len(errs) != 1 || !strings.Contains(errs[0], "go.mod") {
+		t.Fatalf("expected missing go.mod validation, got: %v", errs)
+	}
+	if err := os.WriteFile(filepath.Join(path, "go.mod"), []byte("module my-app"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if errs := Validate(path, "go"); len(errs) != 0 {
+		t.Fatalf("expected no validation errors, got: %v", errs)
+	}
+
+	// Test Node validation
+	if errs := Validate(path, "static"); len(errs) != 1 || !strings.Contains(errs[0], "package.json") {
+		t.Fatalf("expected missing package.json validation, got: %v", errs)
 	}
 }

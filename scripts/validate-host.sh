@@ -16,6 +16,13 @@ check docker version
 check docker compose version
 check docker info
 check docker run --rm hello-world
+check scripts/prepare-runtime-network.sh
+
+if [[ "$(uname -s)" == "Linux" ]]; then
+  check scripts/harden-runtime-firewall.sh check
+else
+  echo "WARN Linux iptables runtime hardening is not verifiable on $(uname -s); configure the Docker VM equivalent." >&2
+fi
 
 for directory in "${MINIDOCK_DATA_PATH:-$HOME/minidock}"/{apps,logs,backups}; do
   mkdir -p "$directory"

@@ -123,3 +123,32 @@ func projectConfig(path string, names ...string) string {
 	}
 	return ""
 }
+
+// Validate checks if the project directory meets the minimum requirements for the selected runtime template.
+// It returns a list of missing requirements/errors.
+func Validate(path, kind string) []string {
+	var missing []string
+	switch kind {
+	case "go":
+		if !exists(filepath.Join(path, "go.mod")) {
+			missing = append(missing, "Falta el archivo go.mod en el directorio del proyecto.")
+		}
+	case "rust":
+		if !exists(filepath.Join(path, "Cargo.toml")) {
+			missing = append(missing, "Falta el archivo Cargo.toml en el directorio del proyecto.")
+		}
+	case "java":
+		if !exists(filepath.Join(path, "pom.xml")) && !exists(filepath.Join(path, "build.gradle")) && !exists(filepath.Join(path, "build.gradle.kts")) {
+			missing = append(missing, "Falta el archivo pom.xml o build.gradle en el directorio del proyecto.")
+		}
+	case "custom":
+		if !exists(filepath.Join(path, "Dockerfile")) {
+			missing = append(missing, "Falta el archivo Dockerfile en el directorio del proyecto.")
+		}
+	case "static", "angular_static", "node_ssr", "vite_ssr", "astro_static", "astro_ssr", "nuxt_static", "nuxt_ssr", "svelte_static", "svelte_ssr", "nextjs":
+		if !exists(filepath.Join(path, "package.json")) {
+			missing = append(missing, "Falta el archivo package.json para este runtime basado en Node.")
+		}
+	}
+	return missing
+}

@@ -1,0 +1,114 @@
+package views
+
+import (
+	"fmt"
+)
+
+type CleanupCandidateInfo struct {
+	ApplicationName string
+	DeploymentID    int64
+	Image           string
+	LogPath         string
+	LogSize         string
+	AgeDays         int
+}
+
+type OperationsCleanupPreviewData struct {
+	Candidates     []CleanupCandidateInfo
+	TotalLogsSize  string
+	TotalImages    int
+	RetentionDays  int
+	RetainedImages int
+	CSRFToken      string
+}
+
+templ OperationsCleanupPreview(data OperationsCleanupPreviewData) {
+	<!doctype html>
+	<html lang="es">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width,initial-scale=1"/>
+			<title>Vista previa de limpieza · MiniDock</title>
+			@ThemeStyle()
+		</head>
+		<body>
+			<main class="shell">
+				<a class="back" href="/operations">← Operación</a>
+				<h1>Vista previa de limpieza</h1>
+				<p class="notice">
+					Se aplicará la política de retención: conservar logs y despliegues de los últimos <strong>{ fmt.Sprintf("%d", data.RetentionDays) } días</strong>,{ " " }
+					y retener al menos las <strong>{ fmt.Sprintf("%d", data.RetainedImages) } imágenes exitosas más recientes</strong> por aplicación.
+				</p>
+				<div class="stats">
+					<div class="stat">
+						<small class="eyebrow">Espacio de logs estimado a liberar</small>
+						<strong>{ data.TotalLogsSize }</strong>
+					</div>
+					<div class="stat">
+						<small class="eyebrow">Imágenes a eliminar</small>
+						<strong>{ fmt.Sprintf("%d", data.TotalImages) }</strong>
+					</div>
+					<div class="stat">
+						<small class="eyebrow">Registros DB a depurar</small>
+						<strong>{ fmt.Sprintf("%d", len(data.Candidates)) }</strong>
+					</div>
+				</div>
+				if len(data.Candidates) > 0 {
+					<section>
+						<h2>Elementos seleccionados para depurar</h2>
+						<div class="table-wrap">
+							<table>
+								<thead>
+									<tr>
+										<th>Aplicación</th>
+										<th>Despliegue ID</th>
+										<th>Imagen Docker</th>
+										<th>Tamaño de Log</th>
+										<th>Antigüedad</th>
+									</tr>
+								</thead>
+								<tbody>
+									for _, cand := range data.Candidates {
+										<tr>
+											<td>{ cand.ApplicationName }</td>
+											<td>#{ fmt.Sprintf("%d", cand.DeploymentID) }</td>
+											<td>
+												if cand.Image != "" {
+													<code>{ cand.Image }</code>
+												} else {
+													<span class="muted">Ninguna</span>
+												}
+											</td>
+											<td>
+												if cand.LogSize != "" {
+													{ cand.LogSize }
+												} else {
+													<span class="muted">-</span>
+												}
+											</td>
+											<td>{ fmt.Sprintf("%d", cand.AgeDays) } días</td>
+										</tr>
+									}
+								</tbody>
+							</table>
+						</div>
+					</section>
+					<section>
+						<h2>Confirmar acción</h2>
+						<p class="warning">⚠️ Esta acción es irreversible. Se eliminarán los archivos de log de la máquina y las imágenes seleccionadas de Docker. Las imágenes activas o en uso no se verán afectadas.</p>
+						<div class="actions" style="margin-top: 18px;">
+							<form method="post" action="/operations/retention">
+								<input type="hidden" name="csrf_token" value={ data.CSRFToken }/>
+								<button class="danger">Confirmar y ejecutar limpieza ahora</button>
+							</form>
+							<a class="button" href="/operations" style="background: transparent; color: var(--paper); border-color: var(--line);">Cancelar</a>
+						</div>
+					</section>
+				} else {
+					<p class="muted">No hay artefactos ni logs que requieran limpieza según la política de retención actual.</p>
+				}
+				@BrandFooter()
+			</main>
+		</body>
+	</html>
+}

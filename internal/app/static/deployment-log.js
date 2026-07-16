@@ -4,11 +4,14 @@
 
   const output = preview.querySelector('pre');
   const message = preview.querySelector('.muted');
+  const currentStatus = preview.dataset.deploymentStatus;
+
   const show = text => {
     if (!text) return;
     output.textContent = text.slice(-16 * 1024);
     output.hidden = false;
     if (message) message.hidden = true;
+    output.scrollTop = output.scrollHeight;
   };
   const fallback = async () => {
     try {
@@ -27,6 +30,9 @@
     stream.onerror = () => {
       stream.close();
       fallback();
+      if (currentStatus === 'queued' || currentStatus === 'running') {
+        setTimeout(() => window.location.reload(), 1500);
+      }
     };
   } else {
     fallback();

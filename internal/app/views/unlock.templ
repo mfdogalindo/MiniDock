@@ -1,0 +1,34 @@
+package views
+
+templ Unlock(errMsg string) {
+	<!doctype html>
+	<html lang="es">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width,initial-scale=1"/>
+			<title>Desbloquear MiniDock · by Kyberix</title>
+			@ThemeStyle()
+		</head>
+		<body>
+			<main class="narrow">
+				<p class="eyebrow">Kyberix / Acceso restringido</p>
+				<h1>Desbloquear<br/>MiniDock</h1>
+				<div class="brand-signature">by <a href="https://kyberix.co/en" rel="noopener noreferrer">Kyberix</a></div>
+				<p>Introduce la contraseña maestra para administrar secretos y despliegues.</p>
+				if errMsg != "" {
+					<p class="error">{ errMsg }</p>
+				}
+				<section>
+					<form method="post" action="/unlock">
+						<label for="password">Contraseña maestra</label>
+						<input id="password" name="password" type="password" required autofocus/>
+						<div class="form-actions">
+							<button type="submit">Desbloquear →</button>
+						</div>
+					</form>
+				</section>
+				@BrandFooter()
+			</main>
+		</body>
+	</html>
+}

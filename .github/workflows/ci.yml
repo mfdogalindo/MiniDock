@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-and-compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run Govulncheck
+        uses: golang/x/vuln/cmd/govulncheck@v1
+        with:
+          package: ./...
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Validate Compose model
+        run: docker compose config --quiet
+
+      - name: Run reproducible release acceptance gate
+        run: MINIDOCK_E2E_REPORT="$RUNNER_TEMP/md-p0-04-e2e.json" scripts/e2e-compose.sh
+
+      - name: Upload Compose acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: md-p0-04-release-acceptance
+          path: |
+            ${{ runner.temp }}/md-p0-04-e2e.json
+            ${{ runner.temp }}/md-p0-04-e2e.log
+          if-no-files-found: warn

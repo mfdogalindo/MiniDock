@@ -1,3 +1,9 @@
+{
+	# The Admin API is bound only to Caddy's private control network. It is not
+	# published on the host and MiniDock is its sole configured client.
+	admin 172.31.250.2:2019
+}
+
 {$MINIDOCK_DOMAIN:localhost} {
 	reverse_proxy minidock:8080
 }

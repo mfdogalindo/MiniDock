@@ -163,6 +163,24 @@ func (a *App) createLocalRepositoryFolder(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(map[string]string{"path": filepath.ToSlash(strings.TrimPrefix(path, root+string(os.PathSeparator)))})
 }
 
+func (a *App) validateLocalRuntime(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuthorization(w, r) {
+		return
+	}
+	path, ok := a.localRepositoryPath(r.URL.Query().Get("path"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	kind := r.URL.Query().Get("type")
+	missing := runtime.Validate(path, kind)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"valid":   len(missing) == 0,
+		"missing": missing,
+	})
+}
+
 func (a *App) localRepositoryPath(relative string) (string, bool) {
 	root, err := filepath.EvalSymlinks(a.config.LocalRepositoriesPath)
 	if err != nil {

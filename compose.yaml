@@ -11,34 +11,160 @@ services:
       MINIDOCK_WORKSPACE_PATH: /var/lib/minidock/apps
       MINIDOCK_LOG_PATH: /var/lib/minidock/logs
       MINIDOCK_LOCAL_REPOSITORIES_PATH: /repos
+      MINIDOCK_DOCKER_NETWORK: ${MINIDOCK_DOCKER_NETWORK:-minidock}
+      MINIDOCK_DOCKER_NETWORK_SUBNET: ${MINIDOCK_DOCKER_NETWORK_SUBNET:-172.31.251.0/24}
+      MINIDOCK_RUNTIME: ${MINIDOCK_RUNTIME:-auto}
       MINIDOCK_GITHUB_APP_ID: ${MINIDOCK_GITHUB_APP_ID:-}
       MINIDOCK_GITHUB_APP_PRIVATE_KEY_PATH: ${MINIDOCK_GITHUB_APP_PRIVATE_KEY_PATH:-}
+      MINIDOCK_GITHUB_API_URL: ${MINIDOCK_GITHUB_API_URL:-https://api.github.com}
+      MINIDOCK_GITHUB_WEBHOOK_SECRET: ${MINIDOCK_GITHUB_WEBHOOK_SECRET:-}
+      # Limit applies only after a valid GitHub signature and is persisted in
+      # SQLite, so a MiniDock restart cannot reset a burst of deploy requests.
+      MINIDOCK_GITHUB_WEBHOOK_RATE_LIMIT: ${MINIDOCK_GITHUB_WEBHOOK_RATE_LIMIT:-30}
+      MINIDOCK_GITHUB_WEBHOOK_RATE_WINDOW: ${MINIDOCK_GITHUB_WEBHOOK_RATE_WINDOW:-1m}
+      MINIDOCK_NOTIFICATION_WEBHOOK: ${MINIDOCK_NOTIFICATION_WEBHOOK:-}
+      MINIDOCK_DISK_ALERT_PERCENT: ${MINIDOCK_DISK_ALERT_PERCENT:-85}
+      MINIDOCK_CERTIFICATE_ALERT_DAYS: ${MINIDOCK_CERTIFICATE_ALERT_DAYS:-21}
+      MINIDOCK_RETENTION_DAYS: ${MINIDOCK_RETENTION_DAYS:-30}
+      MINIDOCK_RETAINED_IMAGES: ${MINIDOCK_RETAINED_IMAGES:-3}
+      MINIDOCK_SOURCE_TIMEOUT: ${MINIDOCK_SOURCE_TIMEOUT:-5m}
+      MINIDOCK_BUILD_TIMEOUT: ${MINIDOCK_BUILD_TIMEOUT:-20m}
+      MINIDOCK_START_TIMEOUT: ${MINIDOCK_START_TIMEOUT:-2m}
+      MINIDOCK_HEALTH_TIMEOUT: ${MINIDOCK_HEALTH_TIMEOUT:-30s}
+      MINIDOCK_WORKSPACE_MAX_BYTES: ${MINIDOCK_WORKSPACE_MAX_BYTES:-2147483648}
+      MINIDOCK_LOG_MAX_BYTES: ${MINIDOCK_LOG_MAX_BYTES:-20971520}
+      MINIDOCK_MAX_CONCURRENT_DEPLOYMENTS: ${MINIDOCK_MAX_CONCURRENT_DEPLOYMENTS:-1}
+      MINIDOCK_CLOUDFLARED_IMAGE: ${MINIDOCK_CLOUDFLARED_IMAGE:-cloudflare/cloudflared:2026.7.2}
+      MINIDOCK_CLOUDFLARED_NETWORK: ${MINIDOCK_CLOUDFLARED_NETWORK:-minidock-edge}
+      # Vacío conserva el dominio administrativo igual a MINIDOCK_DOMAIN.
+      MINIDOCK_ADMIN_DOMAIN: ${MINIDOCK_ADMIN_DOMAIN:-}
+      # Probe Caddy over the private control network. MiniDock sends the real
+      # virtual Host and accepts Caddy's HTTPS redirect without following it.
+      MINIDOCK_PROXY_URL: http://caddy
+      # Private Caddy control plane; never publish port 2019 on the host.
+      MINIDOCK_CADDY_ADMIN_URL: http://172.31.250.2:2019
+      MINIDOCK_PROXY_EXPECTED_STATUS: ${MINIDOCK_PROXY_EXPECTED_STATUS:-200}
+      MINIDOCK_PROXY_EXPECTED_CONTENT: ${MINIDOCK_PROXY_EXPECTED_CONTENT:-}
+      MINIDOCK_BACKUP_PATH: /var/lib/minidock/backups
+      MINIDOCK_BACKUP_INTERVAL: ${MINIDOCK_BACKUP_INTERVAL:-24h}
+      MINIDOCK_BACKUP_RETENTION: ${MINIDOCK_BACKUP_RETENTION:-7}
+      MINIDOCK_BACKUP_PROVIDER: ${MINIDOCK_BACKUP_PROVIDER:-local}
+      MINIDOCK_BACKUP_S3_ENDPOINT: ${MINIDOCK_BACKUP_S3_ENDPOINT:-}
+      MINIDOCK_BACKUP_S3_REGION: ${MINIDOCK_BACKUP_S3_REGION:-us-east-1}
+      MINIDOCK_BACKUP_S3_BUCKET: ${MINIDOCK_BACKUP_S3_BUCKET:-}
+      MINIDOCK_BACKUP_S3_PREFIX: ${MINIDOCK_BACKUP_S3_PREFIX:-minidock}
+      MINIDOCK_BACKUP_S3_ACCESS_KEY: ${MINIDOCK_BACKUP_S3_ACCESS_KEY:-}
+      MINIDOCK_BACKUP_S3_SECRET_KEY: ${MINIDOCK_BACKUP_S3_SECRET_KEY:-}
+      MINIDOCK_SLO_BUILD_DURATION_MINUTES: ${MINIDOCK_SLO_BUILD_DURATION_MINUTES:-10}
+      MINIDOCK_SLO_PROBE_WINDOW: ${MINIDOCK_SLO_PROBE_WINDOW:-24h}
+      # Never mount the Docker socket here. The only runtime endpoint is the
+      # ACL-protected proxy on the private control network.
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
     volumes:
       - minidock-data:/var/lib/minidock
-      - /var/run/docker.sock:/var/run/docker.sock
       - ${MINIDOCK_LOCAL_REPOSITORIES_PATH_HOST:-./repositories}:/repos:rw
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Entrypoint initializes the named data volume and uses SETUID/SETGID only
+    # to drop permanently to the unprivileged minidock user via su-exec.
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    networks:
+      control:
+        ipv4_address: 172.31.250.3
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
 
+  # This is the sole workload allowed to mount Docker's Unix socket. Its ACL
+  # exposes only the API families MiniDock needs; it is not published to host.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    environment:
+      LOG: ${MINIDOCK_DOCKER_PROXY_LOG:-warning}
+      INFO: 1
+      CONTAINERS: 1
+      IMAGES: 1
+      NETWORKS: 1
+      POST: 1
+      BUILD: 1
+      AUTH: 0
+      COMMIT: 0
+      CONFIGS: 0
+      DISTRIBUTION: 0
+      EVENTS: 0
+      EXEC: 0
+      NODES: 0
+      PLUGINS: 0
+      SECRETS: 0
+      SERVICES: 0
+      SESSION: 0
+      SWARM: 0
+      SYSTEM: 0
+      TASKS: 0
+      VOLUMES: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Docker initializes this volume from the image, preserving the upstream
+      # template while allowing the entrypoint to render its effective ACL.
+      - docker-proxy-config:/usr/local/etc/haproxy
+    read_only: true
+    tmpfs:
+      - /run
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      control:
+        ipv4_address: 172.31.250.4
+    restart: unless-stopped
   caddy:
-    image: lucaslorentz/caddy-docker-proxy:2.10-alpine
+    image: caddy:2.10-alpine
     depends_on:
-      - minidock
+      minidock:
+        condition: service_healthy
     environment:
       MINIDOCK_DOMAIN: ${MINIDOCK_DOMAIN:-localhost}
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
     restart: unless-stopped
+    networks:
+      edge:
+      control:
+        ipv4_address: 172.31.250.2
+      workload:
+        # Must belong to MINIDOCK_DOCKER_NETWORK_SUBNET. Override both values
+        # together when the default subnet overlaps another local network.
+        ipv4_address: ${MINIDOCK_CADDY_WORKLOAD_IP:-172.31.251.2}
 
 volumes:
   minidock-data:
   caddy-data:
   caddy-config:
+  docker-proxy-config:
 
 networks:
-  default:
-    name: minidock
+  edge:
+    name: minidock-edge
+  control:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.250.0/29
+  # Created before Compose by scripts/prepare-runtime-network.sh. Applications
+  # are attached here by MiniDock; only Caddy is also attached to edge.
+  workload:
+    name: ${MINIDOCK_DOCKER_NETWORK:-minidock}
+    external: true

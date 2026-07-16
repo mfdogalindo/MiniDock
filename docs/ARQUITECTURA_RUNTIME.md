@@ -1,10 +1,11 @@
 # Arquitectura de runtime y releases
 
-## Decisión
+## Decisión de diseño
 
-MiniDock no está acoplado a Docker ni a Compose. Un release es un contrato
-persistente neutral de proveedor; Docker Engine, Apple Container y los
-proveedores futuros son adaptadores que lo ejecutan.
+MiniDock persiste un contrato de release neutral de proveedor. Esto reduce el
+acoplamiento del modelo de datos, pero la implementación operativa actual sí
+depende de Docker y Caddy: no debe confundirse la abstracción del código con
+paridad funcional entre runtimes.
 
 Un adaptador de runtime recibe un artefacto inmutable, una configuración de
 ejecución no secreta y el contrato de red/health. Debe poder construir o
@@ -12,10 +13,11 @@ resolver el artefacto, iniciar un candidato, inspeccionarlo, detenerlo y
 eliminar sus artefactos. No debe filtrar secretos hacia el registro de release
 ni hacia sus eventos.
 
-El adaptador de proxy es independiente: publica una ruta para un candidato,
-comprueba que la reconoce y la retira. Esto permite que Apple Container u otro
-runtime use el mismo contrato aunque no soporte etiquetas de Caddy Docker
-Proxy.
+La interfaz de proxy es independiente en el código. En la práctica,
+`CaddyProxyAdapter.Apply` reemplaza una ruta identificada de MiniDock mediante
+la Admin API JSON privada de Caddy. Docker no usa etiquetas `caddy.*`: así un
+evento de contenedor no puede competir con la conmutación. Apple Container no
+cuenta aún con un adaptador de proxy equivalente.
 
 En código, `RuntimeAdapter` delimita las operaciones de build, arranque,
 control, logs, estado y retención. `DockerAdapter` y `AppleContainerAdapter`
@@ -39,7 +41,14 @@ metadatos de infraestructura.
 
 ## Adaptadores actuales y transición
 
-El adaptador Docker actual sigue siendo la implementación operativa inicial.
-Apple Container se mantiene como runtime seleccionable, pero no se marcará un
-release como enrutado hasta que exista su adaptador de proxy. Las etiquetas de
-Caddy son un detalle del adaptador Docker, no parte del modelo de datos.
+Docker es la única implementación candidata a soporte operativo. Su
+conmutación Blue-Green valida un candidato, reemplaza atómicamente la ruta de
+Caddy y conserva el color anterior hasta que la sonda externa confirma el
+nuevo. La recuperación tras una caída se controla en `MD-P0-03` de
+[PLAN_MEJORAS.md](PLAN_MEJORAS.md).
+
+Apple Container es experimental. Puede construir e iniciar un contenedor, pero
+carece de health y ruta equivalentes, digest persistido, métricas y retención.
+No debe interpretarse un job exitoso en ese runtime como disponibilidad por
+dominio. Las rutas Caddy siguen siendo un detalle del adaptador Docker, no
+parte del modelo persistido.

@@ -48,6 +48,10 @@ func ValidateKey(key, nonce, ciphertext []byte) error {
 }
 
 func Encrypt(key, plaintext []byte) (nonce, ciphertext []byte, err error) {
+	return EncryptWithAAD(key, plaintext, nil)
+}
+
+func EncryptWithAAD(key, plaintext, additionalData []byte) (nonce, ciphertext []byte, err error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create cipher: %w", err)
@@ -60,10 +64,28 @@ func Encrypt(key, plaintext []byte) (nonce, ciphertext []byte, err error) {
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return nil, nil, err
 	}
-	return nonce, gcm.Seal(nil, nonce, plaintext, nil), nil
+	return nonce, gcm.Seal(nil, nonce, plaintext, additionalData), nil
+}
+
+// GCMParameters exposes only the format-independent sizes needed to create an
+// authenticated envelope before encryption.
+func GCMParameters(key []byte) (nonceSize, overhead int, err error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return 0, 0, fmt.Errorf("create cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return 0, 0, err
+	}
+	return gcm.NonceSize(), gcm.Overhead(), nil
 }
 
 func Decrypt(key, nonce, ciphertext []byte) ([]byte, error) {
+	return DecryptWithAAD(key, nonce, ciphertext, nil)
+}
+
+func DecryptWithAAD(key, nonce, ciphertext, additionalData []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -72,7 +94,7 @@ func Decrypt(key, nonce, ciphertext []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gcm.Open(nil, nonce, ciphertext, nil)
+	return gcm.Open(nil, nonce, ciphertext, additionalData)
 }
 
 func Zero(value []byte) {
